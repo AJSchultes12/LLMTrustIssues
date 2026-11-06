@@ -1,0 +1,7 @@
+# Raw downloads are large and reproducible from the scripts; keep manifests.
+data/raw/**
+!data/raw/**/
+!data/raw/**/manifest.json
+*.tar.gz
+__pycache__/
+.pytest_cache/
