@@ -1,0 +1,35 @@
+# Local credentials and environment configuration
+.env
+.env.*
+!.env.example
+
+# Python environments and bytecode
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test, lint, and build artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Raw downloads are large and reproducible from the scripts; keep manifests.
+data/raw/**
+!data/raw/**/
+!data/raw/**/manifest.json
+*.tar.gz
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

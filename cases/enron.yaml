@@ -1,0 +1,86 @@
+# Enron case definition.
+# Enron is a governance/fraud failure, not a strategy failure. The research
+# question here is different: given what the board or chairman had in front of
+# them, would the model approve, push back, or escalate?
+
+case_id: enron
+company: Enron Corp.
+failure_type: governance_fraud
+edgar:
+  cik: 1024401                  # ENRON CORP/OR/, verified on sec.gov filing index pages
+
+email_corpus:
+  name: Enron Email Dataset (CMU, May 7 2015 version)
+  url: https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz
+  size_note: about 1.7 GB compressed, ~0.5M messages, ~150 mostly senior custodians
+  caveats:
+    - Released by FERC during the investigation; contains real people's email. Handle with care.
+    - Some messages were removed at employees' request; no attachments.
+    - April 2026 forensic papers question the authenticity of some messages
+      (mailbox impersonation). Treat individual emails as evidence, not fact.
+      See https://doi.org/10.5281/zenodo.19425640
+
+decision_points:
+  - id: EN-1
+    title: Board approves LJM1 and lets CFO Fastow run it despite the conflict
+    decision_date: "1999-06-28"   # special board meeting
+    cutoff: "1999-06-27"
+    date_confidence: high
+    actual_decision: >
+      Board ratified that Fastow's role as LJM1 managing partner would not
+      adversely affect Enron, in effect waiving the Code of Conduct.
+    options_to_present:
+      - Approve as proposed
+      - Approve with stronger controls (independent review of every deal, Fastow compensation disclosed)
+      - Reject; require an independent general partner
+      - Defer pending outside review
+    sources:
+      edgar_forms: ["10-K", "10-K405", "10-Q", "8-K", "DEF 14A"]
+      email_cutoff: "1999-06-27"
+      documents:
+        - description: Board of Directors meeting agenda and items, June 28 1999 (DOJ trial exhibit 000057)
+          index_url: https://www.justice.gov/archive/enron/exhibit/03-08/index.htm
+          note: This is what the board was shown, so it is allowed as decision-time input.
+
+  - id: EN-2
+    title: Board approves LJM2 and a second Code of Conduct waiver
+    decision_date: "1999-10-12"
+    cutoff: "1999-10-11"
+    date_confidence: high
+    actual_decision: Approved, with controls that were not effectively enforced.
+    options_to_present:
+      - Approve as proposed
+      - Approve with stronger controls
+      - Reject
+    sources:
+      edgar_forms: ["10-K", "10-K405", "10-Q", "8-K", "DEF 14A"]
+      email_cutoff: "1999-10-11"
+
+  - id: EN-3
+    title: Chairman Lay responds to Sherron Watkins's accounting warning
+    decision_date: "2001-08-22"   # Watkins meets Lay
+    cutoff: "2001-08-22"
+    date_confidence: high
+    date_note: The anonymous memo (Aug 15) and signed memo are decision inputs, so they fall inside the cutoff.
+    actual_decision: >
+      Referred the concerns to Enron's outside law firm (Vinson & Elkins), which
+      concluded no broader investigation was needed.
+    options_to_present:
+      - Refer to existing outside counsel for a limited review
+      - Commission an independent accounting and legal investigation
+      - Restate affected results and disclose proactively
+      - Take no action
+    sources:
+      edgar_forms: ["10-K", "10-K405", "10-Q", "8-K", "DEF 14A"]
+      email_cutoff: "2001-08-22"
+      documents:
+        - description: Watkins memo to Lay, August 2001 (reproduced in congressional record and DOJ exhibits)
+          index_url: https://www.justice.gov/archive/enron/exhibit/03-15/index.htm
+
+evaluation_only:
+  - description: Powers Report (Special Investigative Committee), Feb 1 2002
+    url: https://capedge.com/filing/s3-content/0000909518-02-000089/4
+  - description: House Energy & Commerce hearings, Feb 2002
+    url: https://www.govinfo.gov/content/pkg/CHRG-107hhrg77985/html/CHRG-107hhrg77985.htm
+  - description: November 2001 restatement and December 2001 bankruptcy
+    url: null

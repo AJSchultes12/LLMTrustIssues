@@ -1,0 +1,80 @@
+# Blockbuster case definition.
+# Every decision point has an information cutoff. Only material dated BEFORE the
+# cutoff may be shown to the model. Anything in `evaluation_only` is ground truth
+# for scoring and must never appear in a prompt.
+
+case_id: blockbuster
+company: Blockbuster Inc.
+failure_type: strategy          # strategy | governance_fraud
+edgar:
+  cik: 1085734                  # BLOCKBUSTER INC, verified on sec.gov filing index pages
+  competitor_ciks:
+    netflix: 1065280            # NETFLIX INC (public from 2002, so no filings before BB-2)
+
+decision_points:
+  - id: BB-1
+    title: Netflix offers to sell itself to Blockbuster for $50M
+    decision_date: "2000-04-30"
+    cutoff: "2000-04-30"
+    date_confidence: low
+    date_note: >
+      Accounts disagree. Reed Hastings places the Dallas meeting in early 2000;
+      Marc Randolph's book (as summarized by Inc.) places it in September 2000.
+      The cutoff uses the earlier window so no later information leaks in.
+      Verify before running and record the choice in the paper.
+    actual_decision: Declined the offer; no serious counter-offer.
+    options_to_present:
+      - Acquire Netflix at or near the asking price
+      - Partner (Netflix runs Blockbuster's online channel)
+      - Decline and build an online service in-house
+      - Decline and stay focused on stores
+    sources:
+      edgar_forms: ["10-K", "10-K405", "10-Q", "8-K", "S-1", "424B4", "DEF 14A"]
+      briefing_facts:
+        - text: Netflix had about 100 employees and about 300,000 subscribers.
+          provenance: Reed Hastings recollection (published 2020), not contemporaneous
+        - text: Netflix expected to lose roughly $50M+ in 2000.
+          provenance: Hastings and Randolph recollections, not contemporaneous
+      notes: >
+        Netflix was private, so there are no Netflix SEC filings before this date.
+        Blockbuster's 1999 IPO prospectus and FY1999 10-K are the main inputs.
+
+  - id: BB-2
+    title: Eliminate late fees chain-wide
+    decision_date: "2004-12-14"   # public announcement
+    cutoff: "2004-12-13"
+    date_confidence: high
+    actual_decision: >
+      Eliminated late fees effective 2005-01-01, despite projecting they would
+      have contributed about $250M-$300M to 2005 operating income.
+    options_to_present:
+      - Eliminate late fees chain-wide
+      - Keep late fees, expand test markets first
+      - Keep late fees, invest the money in Blockbuster Online instead
+    sources:
+      edgar_forms: ["10-K", "10-Q", "8-K", "DEF 14A"]
+      include_competitor_filings: [netflix]
+      notes: Blockbuster completed its divestiture from Viacom in October 2004.
+
+  - id: BB-3
+    title: New CEO (Keyes) decides whether to keep investing in Total Access
+    decision_date: "2007-07-02"   # Keyes appointment announced
+    cutoff: "2007-07-01"
+    date_confidence: medium
+    date_note: The strategy shift happened over the following months; the cutoff marks the leadership change.
+    actual_decision: >
+      Pulled back from subsidizing Total Access, reinstated fees, refocused on
+      retail stores; later acquired Movielink.
+    options_to_present:
+      - Keep subsidizing Total Access to win subscribers
+      - Cut Total Access spending and refocus on store profitability
+      - Pursue a merger or deal with Netflix
+    sources:
+      edgar_forms: ["10-K", "10-Q", "8-K", "DEF 14A"]
+      include_competitor_filings: [netflix]
+
+evaluation_only:
+  - description: Blockbuster 10-K for fiscal 2007 (filed 2008, includes restatement)
+    url: https://www.sec.gov/Archives/edgar/data/1085734/000119312508048757/d10k.htm
+  - description: 2010 bankruptcy filing and later history
+    url: null
