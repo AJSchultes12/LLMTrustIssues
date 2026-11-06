@@ -1,4 +1,4 @@
-# flop-bench
+# LLMTrustIssues
 
 Could a temperature-0 language model have made better calls than the executives
 behind some of history's biggest business failures? This repo builds a
