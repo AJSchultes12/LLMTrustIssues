@@ -161,8 +161,53 @@ def test_level2_uses_reviewed_rewrite(tmp_path):
     l1 = load_sources(make_case(), make_dp(), tmp_path, level=1)
     assert {d.text for d in l1} == {"original", "other original"}
     write(rd / "documents_rewritten" / "REVIEWED", "")
+    # a partial rewrite set is refused even when marked REVIEWED: the original
+    # famous memo must never reach a level 2-3 prompt
+    with pytest.raises(UnreviewedRewrite, match="2001-08-02_other.txt"):
+        load_sources(make_case(), make_dp(), tmp_path, level=2)
+    write(rd / "documents_rewritten" / "2001-08-02_other.txt", "other rewritten")
     l2 = load_sources(make_case(), make_dp(), tmp_path, level=2)
-    assert {d.text for d in l2} == {"rewritten", "other original"}
+    assert {d.text for d in l2} == {"rewritten", "other rewritten"}
+
+
+@pytest.mark.parametrize("level", [2, 3])
+def test_no_rewrite_dir_at_level_2_3_raises(tmp_path, level):
+    write(raw_dir(tmp_path) / "documents" / "2001-08-01_memo.txt", "original")
+    with pytest.raises(UnreviewedRewrite, match="2001-08-01_memo.txt"):
+        load_sources(make_case(), make_dp(), tmp_path, level=level)
+
+
+def test_full_rewrite_set_without_marker_raises(tmp_path):
+    rd = raw_dir(tmp_path)
+    write(rd / "documents" / "2001-08-01_memo.txt", "original")
+    write(rd / "documents_rewritten" / "2001-08-01_memo.txt", "rewritten")
+    with pytest.raises(UnreviewedRewrite, match="REVIEWED"):
+        load_sources(make_case(), make_dp(), tmp_path, level=3)
+
+
+def test_level1_needs_no_rewrite(tmp_path):
+    write(raw_dir(tmp_path) / "documents" / "2001-08-01_memo.txt", "original")
+    assert [d.text for d in load_sources(make_case(), make_dp(), tmp_path, level=1)] == \
+        ["original"]
+
+
+def test_no_documents_needs_no_rewrite(tmp_path):
+    write(raw_dir(tmp_path) / "2001-06-01_enron_8-K_0002.txt", "filing")
+    assert len(load_sources(make_case(), make_dp(), tmp_path, level=2)) == 1
+
+
+@pytest.mark.parametrize("where", ["documents", "twin"])
+def test_non_txt_document_raises(tmp_path, where):
+    if where == "documents":
+        d = raw_dir(tmp_path) / "documents"
+        level, scenario = 1, "real"
+    else:
+        d = tmp_path / "twin" / "enron" / "EN-3b" / "documents"
+        level, scenario = 3, "twin"
+    write(d / "2001-08-01_memo.txt", "memo")
+    write(d / "2001-08-01_memo.pdf", "binary")
+    with pytest.raises(ValueError, match="2001-08-01_memo.pdf"):
+        load_sources(make_case(), make_dp(), tmp_path, level=level, scenario=scenario)
 
 
 def test_rewrite_dir_with_late_file_is_not_a_back_door(tmp_path):

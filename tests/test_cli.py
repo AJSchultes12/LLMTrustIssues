@@ -86,10 +86,14 @@ def env(tmp_path) -> dict:
                          "usd_per_mtok_out": None, "pool": "other"},
         },
     }), encoding="utf-8")
-    docs = tmp_path / "data" / "raw" / "enron" / "EN-X" / "documents"
-    docs.mkdir(parents=True)
-    (docs / "2001-08-14_note.txt").write_text(
-        "Skilling told Lay he is leaving Enron. Budget $100 million in 2001.", encoding="utf-8")
+    raw = tmp_path / "data" / "raw" / "enron" / "EN-X"
+    # levels 2-3 need a reviewed rewrite of every document (here: same text)
+    for sub in ("documents", "documents_rewritten"):
+        (raw / sub).mkdir(parents=True)
+        (raw / sub / "2001-08-14_note.txt").write_text(
+            "Skilling told Lay he is leaving Enron. Budget $100 million in 2001.",
+            encoding="utf-8")
+    (raw / "documents_rewritten" / "REVIEWED").write_text("", encoding="utf-8")
     return {
         "common": ["--case", str(cases / "case.yaml"), "--rules", str(cases / "rules.yaml"),
                    "--rubric", str(cases / "rubric.yaml"), "--models", str(models),
@@ -240,6 +244,20 @@ def test_run_stops_at_cap_per_arm_and_exits_0(env, capsys):
     assert "cap" in out.lower()
     names = [p.name for p in (env["runs"] / "trials").glob("*.json")]
     assert len(names) == 6 and all(".free." in n for n in names)
+
+
+def test_run_without_rewrite_writes_only_level1(env, capsys):
+    raw = env["tmp"] / "data" / "raw" / "enron" / "EN-X"
+    (raw / "documents_rewritten" / "2001-08-14_note.txt").unlink()
+    client = FakeClient()
+    code = cli.main(["run", *env["common"], "--arms", "free", "--repeats", "1",
+                     "--skip-probes"], client_factory=lambda arm: client,
+                    rubric_checker=ok_checker)
+    assert code == 1
+    assert "2001-08-14_note.txt" in capsys.readouterr().err
+    names = [p.name for p in (env["runs"] / "trials").glob("*.json")]
+    assert names and all(".L1." in n for n in names)
+    assert len(client.calls) == len(names)  # no level 2-3 call was made
 
 
 def test_run_other_failure_returns_1(env):

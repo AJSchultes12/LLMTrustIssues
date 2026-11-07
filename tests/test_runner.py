@@ -63,10 +63,14 @@ class FakeClient:
 
 @pytest.fixture
 def data_root(tmp_path) -> Path:
-    docs = tmp_path / "data" / "raw" / "enron" / "EN-X" / "documents"
-    docs.mkdir(parents=True)
-    (docs / "2001-08-14_note.txt").write_text(
-        "Skilling told Lay he is leaving Enron. Budget $100 million in 2001.", encoding="utf-8")
+    raw = tmp_path / "data" / "raw" / "enron" / "EN-X"
+    # levels 2-3 need a reviewed rewrite of every document (here: same text)
+    for sub in ("documents", "documents_rewritten"):
+        (raw / sub).mkdir(parents=True)
+        (raw / sub / "2001-08-14_note.txt").write_text(
+            "Skilling told Lay he is leaving Enron. Budget $100 million in 2001.",
+            encoding="utf-8")
+    (raw / "documents_rewritten" / "REVIEWED").write_text("", encoding="utf-8")
     return tmp_path / "data"
 
 

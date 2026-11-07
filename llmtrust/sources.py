@@ -24,7 +24,7 @@ class EvaluationLeak(Exception):
 
 
 class UnreviewedRewrite(Exception):
-    """Rewritten documents exist but have not been marked REVIEWED."""
+    """At level 2-3 a document has no rewrite, or the rewrites are not marked REVIEWED."""
 
 
 _DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})_(.*)$", re.DOTALL)
@@ -157,14 +157,36 @@ def _load_emails(raw: Path, cutoff: date) -> list[SourceDoc]:
     return docs
 
 
+def _document_files(docs_dir: Path) -> list[Path]:
+    """Manual documents must be .txt, the only kind scripts/rewrite_memo.py rewrites."""
+    files = _files(docs_dir)
+    other = [p.name for p in files if p.suffix.lower() != ".txt"]
+    if other:
+        raise ValueError(f"{docs_dir} may hold only .txt documents; found {other}")
+    return files
+
+
+def _check_rewrites(docs_dir: Path, rewritten_dir: Path) -> None:
+    """Level 2-3: every document needs a same-named rewrite and the REVIEWED marker."""
+    originals = _document_files(docs_dir)
+    if not originals:
+        return
+    missing = [p.name for p in originals if not (rewritten_dir / p.name).is_file()]
+    if missing:
+        raise UnreviewedRewrite(
+            f"{rewritten_dir} lacks a rewrite of {missing}: levels 2-3 never use the "
+            f"original documents (run scripts/rewrite_memo.py, review, create {_REVIEWED})")
+    if not (rewritten_dir / _REVIEWED).is_file():
+        raise UnreviewedRewrite(
+            f"{rewritten_dir} has rewritten documents but no {_REVIEWED} marker")
+
+
 def _load_documents(docs_dir: Path, cutoff: date,
                     rewritten_dir: Path | None) -> list[SourceDoc]:
     docs = []
-    for p in _files(docs_dir):
+    for p in _document_files(docs_dir):
         iso, slug = _dated_name(p, cutoff, str(docs_dir))
-        source = p
-        if rewritten_dir is not None and (rewritten_dir / p.name).is_file():
-            source = rewritten_dir / p.name
+        source = p if rewritten_dir is None else rewritten_dir / p.name
         docs.append(SourceDoc(date=iso, kind="document",
                               title=Path(slug).stem, text=_read(source)))
     return docs
@@ -191,10 +213,7 @@ def load_sources(case: Case, dp: DecisionPoint, data_root: Path, *,
         docs_dir = raw / "documents"
         if level >= 2:
             rewritten = raw / "documents_rewritten"
-            has_rewrites = any(p.name != _REVIEWED for p in _files(rewritten))
-            if has_rewrites and not (rewritten / _REVIEWED).is_file():
-                raise UnreviewedRewrite(
-                    f"{rewritten} has rewritten documents but no {_REVIEWED} marker")
+            _check_rewrites(docs_dir, rewritten)
 
     docs = (_load_filings(raw, cutoff) + _load_emails(raw, cutoff)
             + _load_documents(docs_dir, cutoff, rewritten))
