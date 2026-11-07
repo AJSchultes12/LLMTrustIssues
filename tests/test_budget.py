@@ -41,6 +41,12 @@ def test_budget_uncapped_pool_never_raises(tmp_path):
     b.check("free", 1000.0)
 
 
+def test_budget_paid_pool_without_cap_fails_closed(tmp_path):
+    b = Budget({"claude": 8.0}, tmp_path / "b.json")
+    with pytest.raises(ValueError, match="pool 'other' has no cap"):
+        b.check("other", 0.0)
+
+
 def test_budget_leaves_no_temp_files(tmp_path):
     b = Budget({"claude": 8.0}, tmp_path / "b.json")
     b.record("claude", 1.0)

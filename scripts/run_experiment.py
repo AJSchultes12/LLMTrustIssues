@@ -219,10 +219,14 @@ def cmd_estimate(args, s: Setup, **_) -> int:
             print("pool free: $0.00 (no cap)")
             continue
         cap = s.caps.get(pool)
-        cap_text = "no cap set" if cap is None else f"cap ${cap:.2f}"
-        over = "" if cap is None or s.budget.spent(pool) + usd <= cap else "  OVER CAP"
+        if cap is None:
+            print(f"error: pool {pool!r} has no cap: set caps.{pool} in {args.models}; "
+                  f"run and probe refuse to spend from an uncapped pool", file=sys.stderr)
+            failed = True
+            continue
+        over = "" if s.budget.spent(pool) + usd <= cap else "  OVER CAP"
         print(f"pool {pool}: est ${usd:.2f}, spent so far ${s.budget.spent(pool):.2f}, "
-              f"{cap_text}{over}")
+              f"cap ${cap:.2f}{over}")
     return 1 if failed else 0
 
 

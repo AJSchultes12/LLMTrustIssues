@@ -41,9 +41,14 @@ class Budget:
         return (in_tokens * arm.usd_per_mtok_in + out_tokens * arm.usd_per_mtok_out) / 1_000_000
 
     def check(self, pool: str, usd: float) -> None:
+        """Raise BudgetExceeded if usd would pass the pool's cap. Pool "free" has no cap;
+        any other pool without one fails closed with ValueError."""
+        if pool == "free":
+            return
         cap = self.caps.get(pool)
         if cap is None:
-            return
+            raise ValueError(f"pool {pool!r} has no cap: set caps.{pool} in "
+                             f"config/models.yaml before spending from it")
         if self.spent(pool) + usd > cap:
             raise BudgetExceeded(
                 f"pool {pool!r}: spent ${self.spent(pool):.4f} + ${usd:.4f} "

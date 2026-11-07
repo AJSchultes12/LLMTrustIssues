@@ -51,3 +51,5 @@ class TrialSpec:
 class Completion:
     text: str; model_id: str; provider: str
     input_tokens: int; output_tokens: int; finished_at: str
+    # True when the provider reported no usage and the charge is the pre-call estimate
+    cost_estimated: bool = False

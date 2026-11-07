@@ -9,8 +9,10 @@ from llmtrust.budget import Budget, BudgetExceeded
 from llmtrust.disguise import DisguiseRules
 from llmtrust.models import Arm
 from llmtrust.runner import (
+    ESTIMATE_MARGIN,
     assert_rubric_approved,
     assert_rubric_committed,
+    charged_complete,
     parse_choice,
     run_trial,
     run_trials,
@@ -249,7 +251,7 @@ def test_run_trial_writes_full_record(tmp_path, data_root, rules):
     assert rec["completion"] == {
         "text": '{"choice": "B", "reasoning": "Because."}', "model_id": "m-1-2026",
         "provider": "openai_compat", "input_tokens": 1000, "output_tokens": 100,
-        "finished_at": "2026-11-06T12:00:00+00:00"}
+        "finished_at": "2026-11-06T12:00:00+00:00", "cost_estimated": False}
     assert rec["arm_config"] == {"model": "m-1", "provider": "openai_compat",
                                  "temperature": 0.0, "pool": "other"}
     assert rec["parsed_choice"] == "Open a full investigation"
@@ -277,6 +279,39 @@ def test_run_trial_charges_actual_tokens(tmp_path, data_root):
     run(spec(), tmp_path, data_root, FakeClient(input_tokens=1_000_000, output_tokens=500_000),
         budget=budget)
     assert budget.spent("other") == pytest.approx(1.0 * 1 + 2.0 * 0.5)
+
+
+@pytest.mark.parametrize("usage", [(0, 0), (0, 100), (1000, 0)])
+def test_zero_usage_on_priced_arm_charges_the_estimate(tmp_path, usage):
+    arm = make_arm(price_in=1.0, price_out=2.0)
+    budget = Budget({"other": 100.0}, tmp_path / "budget.json")
+    client = FakeClient(input_tokens=usage[0], output_tokens=usage[1])
+    system, user = "s" * 400, "u" * 3600   # 1000 estimated input tokens
+    completion = charged_complete(client, arm, budget, system, user, 500)
+    expected = (1000 * 1.0 + 500 * 2.0) / 1_000_000 * ESTIMATE_MARGIN
+    assert budget.spent("other") == pytest.approx(expected)
+    assert completion.cost_estimated is True
+
+
+def test_reported_usage_is_charged_as_reported(tmp_path):
+    budget = Budget({"other": 100.0}, tmp_path / "budget.json")
+    completion = charged_complete(FakeClient(input_tokens=10, output_tokens=5), make_arm(),
+                                  budget, "s", "u", 500)
+    assert budget.spent("other") == pytest.approx((10 * 1.0 + 5 * 2.0) / 1_000_000)
+    assert completion.cost_estimated is False
+
+
+def test_zero_usage_on_free_arm_charges_nothing(tmp_path):
+    budget = Budget({}, tmp_path / "budget.json")
+    completion = charged_complete(FakeClient(input_tokens=0, output_tokens=0),
+                                  make_arm(pool="free"), budget, "s", "u", 500)
+    assert budget.spent("free") == 0.0 and completion.cost_estimated is False
+
+
+def test_run_trial_record_marks_estimated_cost(tmp_path, data_root):
+    path = run(spec(), tmp_path, data_root, FakeClient(input_tokens=0, output_tokens=0))
+    rec = json.loads(path.read_text(encoding="utf-8"))
+    assert rec["completion"]["cost_estimated"] is True
 
 
 def test_run_trial_resumes(tmp_path, data_root):

@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from llmtrust.budget import Budget, BudgetExceeded, estimate_tokens
@@ -171,17 +171,23 @@ def charged_complete(client: ModelClient, arm: Arm, budget: Budget, system: str,
     """Check the budget (estimate with margin), call the model, record the actual cost.
 
     Pool "free" is neither checked nor charged. Raises BudgetExceeded before any call.
+    When a priced arm's reply reports zero or missing usage, the pre-call estimate (with
+    margin) is charged instead of $0 and the completion is marked cost_estimated.
     """
-    if arm.pool != "free":
-        estimate = budget.estimate_usd(
-            arm, estimate_tokens(system + user), max_tokens) * ESTIMATE_MARGIN
-        budget.check(arm.pool, estimate)
+    if arm.pool == "free":
+        return client.complete(system, user, max_tokens=max_tokens)
+
+    estimate = budget.estimate_usd(
+        arm, estimate_tokens(system + user), max_tokens) * ESTIMATE_MARGIN
+    budget.check(arm.pool, estimate)
 
     completion = client.complete(system, user, max_tokens=max_tokens)
 
-    if arm.pool != "free":
-        budget.record(arm.pool, budget.estimate_usd(
-            arm, completion.input_tokens, completion.output_tokens))
+    if completion.input_tokens <= 0 or completion.output_tokens <= 0:
+        budget.record(arm.pool, estimate)
+        return replace(completion, cost_estimated=True)
+    budget.record(arm.pool, budget.estimate_usd(
+        arm, completion.input_tokens, completion.output_tokens))
     return completion
 
 

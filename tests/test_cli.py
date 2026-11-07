@@ -297,6 +297,33 @@ def test_run_without_rewrite_writes_only_level1(env, capsys):
     assert len(client.calls) == len(names)  # no level 2-3 call was made
 
 
+def _drop_other_cap(env):
+    models = Path(env["common"][env["common"].index("--models") + 1])
+    raw = yaml.safe_load(models.read_text(encoding="utf-8"))
+    del raw["caps"]["other"]
+    models.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+
+def test_uncapped_paid_pool_fails_closed(env, capsys):
+    _drop_other_cap(env)
+    client = FakeClient()
+    code = cli.main(["run", *env["common"], "--arms", "paid", "--repeats", "1",
+                     "--skip-probes"], client_factory=lambda arm: client,
+                    rubric_checker=ok_checker)
+    assert code == 1
+    assert "has no cap" in capsys.readouterr().err
+    assert client.calls == []
+    code = cli.main(["probe", *env["common"], "--arms", "paid", "--repeats", "1"],
+                    client_factory=lambda arm: client)
+    assert code == 1
+    assert "has no cap" in capsys.readouterr().err
+    assert client.calls == []
+    code = cli.main(["estimate", *env["common"], "--arms", "paid", "--repeats", "1"],
+                    client_factory=exploding_factory)
+    assert code == 1
+    assert "has no cap" in capsys.readouterr().err
+
+
 def test_run_other_failure_returns_1(env):
     class Boom:
         def complete(self, system, user, *, max_tokens):
