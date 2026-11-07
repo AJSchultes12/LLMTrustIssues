@@ -191,6 +191,12 @@ def test_parse_json_in_prose():
     assert parse_choice(text, OPTION_MAP) == ("Do nothing", "Wait.", None)
 
 
+def test_parse_literal_newline_and_tab_inside_string():
+    text = '{"choice": "B", "reasoning": "line1\nline2\tend"}'  # real control characters
+    assert parse_choice(text, OPTION_MAP) == ("Open a full investigation", "line1\nline2\tend",
+                                              None)
+
+
 def test_parse_lowercase_and_punctuation():
     for raw in ("b", "b.", "(B)", " B) ", "[b]"):
         text = json.dumps({"choice": raw, "reasoning": "r"})

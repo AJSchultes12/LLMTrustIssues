@@ -42,7 +42,8 @@ python scripts/fetch_edgar.py cases/enron.yaml
 curl -O https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz
 python scripts/filter_enron_emails.py enron_mail_20150507.tar.gz --cutoff 1999-06-27 --out data/raw/enron/EN-1/emails.jsonl
 python scripts/filter_enron_emails.py enron_mail_20150507.tar.gz --cutoff 1999-10-11 --out data/raw/enron/EN-2/emails.jsonl
-python scripts/filter_enron_emails.py enron_mail_20150507.tar.gz --cutoff 2001-08-22 --out data/raw/enron/EN-3/emails.jsonl
+python scripts/filter_enron_emails.py enron_mail_20150507.tar.gz --cutoff 2001-08-14 --custodians lay-k skilling-j --out data/raw/enron/EN-3a/emails.jsonl
+python scripts/filter_enron_emails.py enron_mail_20150507.tar.gz --cutoff 2001-08-22 --custodians lay-k skilling-j --out data/raw/enron/EN-3b/emails.jsonl
 
 pytest -q
 ```

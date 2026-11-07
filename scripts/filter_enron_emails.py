@@ -12,8 +12,10 @@ Usage:
     python scripts/filter_enron_emails.py enron_mail_20150507.tar.gz \
         --cutoff 1999-06-27 --out data/raw/enron/EN-1/emails.jsonl
     # optionally restrict to specific custodians (maildir folder names):
+    python scripts/filter_enron_emails.py corpus.tar.gz --cutoff 2001-08-14 \
+        --custodians lay-k skilling-j --out data/raw/enron/EN-3a/emails.jsonl
     python scripts/filter_enron_emails.py corpus.tar.gz --cutoff 2001-08-22 \
-        --custodians lay-k skilling-j fastow-a --out data/raw/enron/EN-3/emails.jsonl
+        --custodians lay-k skilling-j --out data/raw/enron/EN-3b/emails.jsonl
 """
 from __future__ import annotations
 

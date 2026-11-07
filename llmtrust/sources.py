@@ -226,6 +226,9 @@ def load_sources(case: Case, dp: DecisionPoint, data_root: Path, *,
     data_root = Path(data_root)
     cutoff = date.fromisoformat(dp.cutoff)
     raw = data_root / "raw" / case.case_id / dp.id
+    if scenario == "real" and not raw.is_dir():
+        raise FileNotFoundError(f"no source directory {raw}: fetch the filings and emails "
+                                f"for {case.case_id} {dp.id} first (see README)")
 
     _check_evaluation(case, raw / "manifest.json")
 
@@ -240,6 +243,9 @@ def load_sources(case: Case, dp: DecisionPoint, data_root: Path, *,
 
     docs = (_load_filings(raw, cutoff) + _load_emails(raw, cutoff)
             + _load_documents(docs_dir, cutoff, rewritten))
+    if scenario == "real" and not docs:
+        raise ValueError(f"{raw} holds no source documents (filings, emails.jsonl or "
+                         f"documents/); a prompt would have no materials")
     return sorted(docs, key=lambda d: d.date)
 
 

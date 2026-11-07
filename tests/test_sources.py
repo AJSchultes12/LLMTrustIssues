@@ -185,12 +185,22 @@ def test_evaluation_url_in_manifest_rejected(tmp_path):
 def test_null_evaluation_url_does_not_match(tmp_path):
     rd = raw_dir(tmp_path)
     write(rd / "manifest.json", json.dumps({"filings": [{"url": None}]}))
+    write(rd / "2001-06-01_enron_8-K_0002.txt", "filing")
     case = make_case(evaluation_only=[{"description": "d", "url": None}])
-    assert load_sources(case, make_dp(), tmp_path) == []
+    assert len(load_sources(case, make_dp(), tmp_path)) == 1
 
 
-def test_missing_directory_returns_empty(tmp_path):
-    assert load_sources(make_case(), make_dp(), tmp_path) == []
+def test_missing_directory_raises(tmp_path):
+    with pytest.raises(FileNotFoundError, match="EN-3b"):
+        load_sources(make_case(), make_dp(), tmp_path)
+
+
+def test_directory_with_no_sources_raises(tmp_path):
+    rd = raw_dir(tmp_path)
+    write(rd / "manifest.json", json.dumps({"filings": []}))
+    (rd / "documents").mkdir()
+    with pytest.raises(ValueError, match="no source documents"):
+        load_sources(make_case(), make_dp(), tmp_path)
 
 
 def test_level2_uses_reviewed_rewrite(tmp_path):

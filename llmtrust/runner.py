@@ -71,7 +71,7 @@ def trial_grid(case: Case, arms: list[str], repeats: int, *,
 # ---------- reply parsing ----------
 
 def _find_choice_object(text: str) -> dict | None:
-    decoder = json.JSONDecoder()
+    decoder = json.JSONDecoder(strict=False)  # accept literal newlines/tabs inside strings
     for m in re.finditer(r"\{", text):
         try:
             obj, _ = decoder.raw_decode(text, m.start())
