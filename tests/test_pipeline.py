@@ -90,7 +90,11 @@ def test_filter_script_end_to_end(tmp_path):
     assert len(lines) == 1  # late email excluded, duplicate removed
 
 
-@pytest.mark.parametrize("case_file", sorted((ROOT / "cases").glob("*.yaml")))
+CASE_FILES = [p for p in sorted((ROOT / "cases").glob("*.yaml"))
+              if not p.name.endswith((".rubric.yaml", ".disguise.yaml"))]
+
+
+@pytest.mark.parametrize("case_file", CASE_FILES)
 def test_case_files_are_consistent(case_file):
     case = yaml.safe_load(case_file.read_text())
     ids = [dp["id"] for dp in case["decision_points"]]
