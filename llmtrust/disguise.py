@@ -70,8 +70,11 @@ def replace_terms(text: str, mapping: dict[str, str]) -> str:
 
 # ---------- dollar scaling ----------
 
+_NUM = r"\d{1,3}(?:,\d{3})+|\d+"
 _DOLLAR = re.compile(
-    r"\$(?P<int>\d{1,3}(?:,\d{3})+|\d+)(?P<frac>\.\d+)?"
+    rf"\$(?P<int>{_NUM})(?P<frac>\.\d+)?"
+    # single-dollar range such as "$10-15 million" or "$2 to 3 billion": scale both ends
+    rf"(?:(?P<sep>\s*(?:-|–|—|to)\s*)(?P<int2>{_NUM})(?P<frac2>\.\d+)?)?"
     r"(?P<unit>\s*(?:million|billion|thousand|trillion)\b)?",
     re.IGNORECASE,
 )
@@ -94,10 +97,15 @@ def _format_amount(value: Decimal) -> str:
 def scale_dollars(text: str, factor: float) -> str:
     f = Decimal(str(factor))
 
+    def scaled(int_part: str, frac: str | None) -> str:
+        number = Decimal(int_part.replace(",", "") + (frac or ""))
+        return _format_amount(_sig3(number * f))
+
     def repl(m: re.Match[str]) -> str:
-        number = Decimal(m.group("int").replace(",", "") + (m.group("frac") or ""))
-        scaled = _sig3(number * f)
-        return "$" + _format_amount(scaled) + (m.group("unit") or "")
+        out = "$" + scaled(m.group("int"), m.group("frac"))
+        if m.group("sep") is not None:
+            out += m.group("sep") + scaled(m.group("int2"), m.group("frac2"))
+        return out + (m.group("unit") or "")
 
     return _DOLLAR.sub(repl, text)
 

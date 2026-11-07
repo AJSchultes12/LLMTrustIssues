@@ -97,6 +97,22 @@ def test_scale_dollars_forms():
     assert scale_dollars("no money here: 100 shares, 25%", 0.37) == "no money here: 100 shares, 25%"
 
 
+def test_scale_dollars_single_dollar_ranges(rules):
+    assert scale_dollars("$10-15 million", 0.37) == "$3.7-5.55 million"
+    assert scale_dollars("$200–300 million", 0.37) == "$74–111 million"
+    assert scale_dollars("$2 to 3 billion", 0.37) == "$0.74 to 1.11 billion"
+    assert scale_dollars("$10 - 15 million", 0.37) == "$3.7 - 5.55 million"
+    # both ends use the same factor: ratio preserved within rounding
+    out = scale_dollars("$200-300 million", 0.37)
+    lo, hi = (float(x) for x in out.lstrip("$").split(" ")[0].split("-"))
+    assert abs(hi / lo - 300 / 200) < 0.01
+    # no original figure survives, and the level 3 pipeline uses the same path
+    assert "15" not in disguise_text("a $10-15 million fee", 3, rules).replace("5.55", "")
+    assert disguise_text("a $10-15 million fee", 3, rules) == "a $3.7-5.55 million fee"
+    # separate dollar signs on each end still scale independently as before
+    assert scale_dollars("$10-$15 million", 0.37) == "$3.7-$5.55 million"
+
+
 def test_level3_year_shift_preserves_gaps_and_weekdays(rules):
     out = disguise_text("August 14, 2001 and August 22, 2001", 3, rules)
     assert out == "August 14, 2029 and August 22, 2029"
