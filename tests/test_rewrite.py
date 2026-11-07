@@ -144,3 +144,39 @@ def test_cli_budget_stops_after_first_document(tmp_path):
     assert rc != 0
     assert len(c.calls) == 1
     assert [p.name for p in (base / "documents_rewritten").iterdir()] == ["2001-08-15_a.txt"]
+
+
+# ---------- stale REVIEWED marker ----------
+
+def _with_marker(base):
+    out = base / "documents_rewritten"
+    out.mkdir(exist_ok=True)
+    (out / "REVIEWED").write_text("", encoding="utf-8")
+    return out
+
+
+def test_cli_removes_stale_reviewed_when_writing(tmp_path, capsys):
+    argv, base = _setup(tmp_path)
+    out = _with_marker(base)
+    assert rewrite_memo.main(argv, client_factory=lambda arm: FakeClient()) == 0
+    assert (out / "2001-08-15_memo.txt").exists()
+    assert not (out / "REVIEWED").exists()
+    captured = capsys.readouterr()
+    assert "REVIEWED" in captured.out and "removed" in captured.out.lower()
+
+
+def test_cli_keeps_reviewed_when_all_skipped(tmp_path):
+    argv, base = _setup(tmp_path)
+    out = _with_marker(base)
+    (out / "2001-08-15_memo.txt").write_text("reviewed text", encoding="utf-8")
+    c = FakeClient()
+    assert rewrite_memo.main(argv, client_factory=lambda arm: c) == 0
+    assert c.calls == []
+    assert (out / "REVIEWED").exists()
+
+
+def test_cli_keeps_reviewed_when_budget_stops_before_write(tmp_path):
+    argv, base = _setup(tmp_path, cap=1e-9)
+    out = _with_marker(base)
+    assert rewrite_memo.main(argv, client_factory=lambda arm: FakeClient()) != 0
+    assert (out / "REVIEWED").exists()

@@ -96,6 +96,11 @@ def main(argv: list[str] | None = None,
             print(f"stopped: budget exceeded before {src.name}: {exc}", file=sys.stderr)
             return 1
         out_dir.mkdir(parents=True, exist_ok=True)
+        marker = out_dir / "REVIEWED"
+        if marker.exists():
+            marker.unlink()
+            print(f"WARNING: removed the stale marker {marker}. New unreviewed rewrites are "
+                  f"being written, so you must re-review {out_dir} and create REVIEWED again.")
         dest.write_text(text + "\n", encoding="utf-8")
         print(f"wrote {dest}")
 
