@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import importlib.util
 import json
 import sys
@@ -105,7 +106,14 @@ def env(tmp_path) -> dict:
 
 
 def ok_checker(path):
-    return "sha"
+    # a committed-rubric checker that skips git: the file's real hash, as the real one returns
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def approved_rubric(monkeypatch):
+    """The repo's rubric carries a DRAFT marker on purpose; tests stub the approval."""
+    monkeypatch.setattr(cli, "assert_rubric_approved", lambda rubric_yaml, rubric_md: None)
 
 
 # ---------- estimate ----------
@@ -202,6 +210,35 @@ def test_run_checks_both_rubric_files(env):
     assert seen == ["rubric.yaml", "rubric.md"]
 
 
+def test_run_refuses_draft_rubric(env, capsys):
+    seen = []
+
+    def draft(rubric_yaml, rubric_md):
+        seen.append((Path(rubric_yaml).name, Path(rubric_md).name))
+        raise RuntimeError(f"{rubric_md} is marked DRAFT")
+
+    code = cli.main(["run", *env["common"], "--arms", "free", "--repeats", "1",
+                     "--skip-probes"], client_factory=exploding_factory,
+                    rubric_checker=ok_checker, approval_checker=draft)
+    assert code == 2
+    assert "DRAFT" in capsys.readouterr().err
+    assert seen == [("rubric.yaml", "rubric.md")]
+    assert not (env["runs"] / "trials").exists()
+
+
+def test_only_run_checks_approval(env):
+    def never(rubric_yaml, rubric_md):
+        raise AssertionError("approval must only be checked by run")
+
+    probe_client = FakeClient(text='{"company": "unknown"}')
+    assert cli.main(["estimate", *env["common"], "--arms", "free", "--repeats", "1"],
+                    client_factory=exploding_factory, approval_checker=never) == 0
+    assert cli.main(["probe", *env["common"], "--arms", "free", "--repeats", "1"],
+                    client_factory=lambda arm: probe_client, approval_checker=never) == 0
+    assert cli.main(["score", *env["common"], "--results-dir", str(env["results"])],
+                    rubric_checker=ok_checker, approval_checker=never) == 0
+
+
 def test_run_returns_2_when_probes_missing(env, capsys):
     code = cli.main(["run", *env["common"], "--arms", "paid", "--repeats", "1"],
                     client_factory=exploding_factory, rubric_checker=ok_checker)
@@ -225,7 +262,7 @@ def test_run_skip_probes_writes_records(env, capsys):
     records = sorted((env["runs"] / "trials").glob("*.json"))
     assert len(records) == 12  # 6 per arm
     rec = json.loads(records[0].read_text(encoding="utf-8"))
-    assert rec["rubric_sha"] == "sha"
+    assert rec["rubric_sha"] == ok_checker(env["common"][env["common"].index("--rubric") + 1])
     assert len(clients["paid"].calls) == 6 and len(clients["free"].calls) == 6
     assert "paid" in capsys.readouterr().out
 
@@ -305,7 +342,8 @@ def test_score_writes_summary_csv(env, capsys):
     (probes / "enron.EN-X.L3.real.free.json").write_text(
         json.dumps({"probe_key": "enron.EN-X.L3.real.free", "identified": True}),
         encoding="utf-8")
-    code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])])
+    code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])],
+                    rubric_checker=ok_checker)
     assert code == 0
     with (env["results"] / "summary.csv").open(encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
@@ -313,10 +351,51 @@ def test_score_writes_summary_csv(env, capsys):
     assert by[("1", "True", "headline")]["escalation_rate"] == "1.0"
     assert by[("3", "True", "contaminated")]["n"] == "1"
     assert ("3", "True", "headline") not in by
+    assert by[("2", "True", "unprobed")]["n"] == "1"  # no L2 probe record
+    assert ("2", "True", "headline") not in by
     assert by[("1", "True", "headline")]["mean_reasoning_score"] == ""
     assert by[("1", "True", "headline")]["leak_rate"] == "1.0"  # "bankruptcy" was not in prompt
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert "headline" in out and "contaminated" not in out  # stdout shows headline rows only
+    assert "unprobed" not in out
+    assert "2 unprobed" in captured.err
+
+
+def test_score_flags_reasoning_that_names_the_case(env):
+    cli.main(["run", *env["common"], "--arms", "free", "--repeats", "1", "--skip-probes"],
+             client_factory=lambda arm: FakeClient(
+                 text='{"choice": "B", "reasoning": "Enron cannot survive this."}'),
+             rubric_checker=ok_checker)
+    code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])],
+                    rubric_checker=ok_checker)
+    assert code == 0
+    with (env["results"] / "summary.csv").open(encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    pops = {(r["level"], r["population"]) for r in rows}
+    assert pops == {("1", "headline"), ("2", "contaminated"), ("3", "contaminated")}
+
+
+def test_score_refuses_records_from_another_rubric(env, capsys):
+    cli.main(["run", *env["common"], "--arms", "free", "--repeats", "1", "--skip-probes"],
+             client_factory=lambda arm: FakeClient(), rubric_checker=ok_checker)
+    rubric = Path(env["common"][env["common"].index("--rubric") + 1])
+    rubric.write_text(rubric.read_text(encoding="utf-8") + "# edited\n", encoding="utf-8")
+    code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])],
+                    rubric_checker=ok_checker)
+    assert code == 2
+    assert "rubric" in capsys.readouterr().err
+    assert not (env["results"] / "summary.csv").exists()
+
+
+def test_score_returns_2_when_rubric_checker_raises(env, capsys):
+    def bad(path):
+        raise RuntimeError("rubric has uncommitted changes")
+
+    code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])],
+                    rubric_checker=bad)
+    assert code == 2
+    assert "uncommitted" in capsys.readouterr().err
 
 
 def test_score_with_judge_arm(env):
@@ -324,7 +403,8 @@ def test_score_with_judge_arm(env):
              client_factory=lambda arm: FakeClient(), rubric_checker=ok_checker)
     judge = FakeClient(text='{"criteria": [true]}')
     code = cli.main(["score", *env["common"], "--results-dir", str(env["results"]),
-                     "--judge-arm", "paid"], client_factory=lambda arm: judge)
+                     "--judge-arm", "paid"], client_factory=lambda arm: judge,
+                    rubric_checker=ok_checker)
     assert code == 0
     assert len(judge.calls) == 6
     with (env["results"] / "summary.csv").open(encoding="utf-8", newline="") as f:
@@ -335,7 +415,8 @@ def test_score_with_judge_arm(env):
 
 
 def test_score_with_no_records_writes_header_only(env):
-    code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])])
+    code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])],
+                    rubric_checker=ok_checker)
     assert code == 0
     text = (env["results"] / "summary.csv").read_text(encoding="utf-8")
     assert text.startswith("arm,decision_id,")

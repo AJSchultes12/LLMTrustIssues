@@ -9,6 +9,7 @@ from llmtrust.budget import Budget, BudgetExceeded
 from llmtrust.disguise import DisguiseRules
 from llmtrust.models import Arm
 from llmtrust.runner import (
+    assert_rubric_approved,
     assert_rubric_committed,
     parse_choice,
     run_trial,
@@ -288,6 +289,32 @@ def test_run_trial_resumes(tmp_path, data_root):
     assert p2 == p1
     assert len(client.calls) == 1
     assert budget.spent("other") == spent
+
+
+def test_resume_with_other_rubric_sha_raises(tmp_path, data_root):
+    client = FakeClient()
+    run(spec(), tmp_path, data_root, client)  # written with rubric_sha "abc123"
+    arm = make_arm()
+    budget = Budget({"other": 100.0}, tmp_path / "budget.json")
+    with pytest.raises(RuntimeError, match=spec().trial_id):
+        run_trial(spec(), case=make_case(), dp=make_dp(), rules=None, rubric_sha="changed",
+                  client=client, arm=arm, budget=budget, data_root=data_root,
+                  out_dir=tmp_path / "out")
+    assert len(client.calls) == 1
+
+
+def test_assert_rubric_approved(tmp_path):
+    yaml_f, md_f = tmp_path / "r.yaml", tmp_path / "r.md"
+    yaml_f.write_text("decisions: {}\n", encoding="utf-8")
+    md_f.write_text("# Rubric\nApproved.\n", encoding="utf-8")
+    assert assert_rubric_approved(yaml_f, md_f) is None
+    md_f.write_text("**Status: DRAFT**\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="DRAFT"):
+        assert_rubric_approved(yaml_f, md_f)
+    md_f.write_text("ok\n", encoding="utf-8")
+    yaml_f.write_text("# DRAFT: needs user review\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="r.yaml"):
+        assert_rubric_approved(yaml_f, md_f)
 
 
 def test_budget_checked_before_call(tmp_path, data_root):

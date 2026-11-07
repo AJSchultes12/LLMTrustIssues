@@ -12,6 +12,7 @@ setup (unknown arm, rubric not committed, probes missing).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,7 @@ from llmtrust.probe import build_probe_prompt, probe_key, run_probe  # noqa: E40
 from llmtrust.prompts import build_prompt  # noqa: E402
 from llmtrust.runner import (  # noqa: E402
     ESTIMATE_MARGIN,
+    assert_rubric_approved,
     assert_rubric_committed,
     charged_complete,
     run_trials,
@@ -39,6 +41,7 @@ from llmtrust.runner import (  # noqa: E402
 from llmtrust.score import (  # noqa: E402
     judge_reasoning,
     load_rubric,
+    population,
     score_trial,
     summarize,
     write_csv,
@@ -254,10 +257,11 @@ def cmd_probe(args, s: Setup, *, client_factory, **_) -> int:
 
 # ---------- run ----------
 
-def cmd_run(args, s: Setup, *, client_factory, rubric_checker, **_) -> int:
+def cmd_run(args, s: Setup, *, client_factory, rubric_checker, approval_checker, **_) -> int:
     try:
         rubric_sha = rubric_checker(args.rubric)
         rubric_checker(RUBRIC_DOC)
+        approval_checker(args.rubric, RUBRIC_DOC)
     except Exception as exc:
         raise CliError(str(exc)) from exc
 
@@ -298,8 +302,20 @@ def _fmt(v) -> str:
     return "-" if v is None else (f"{v:.2f}" if isinstance(v, float) else str(v))
 
 
-def cmd_score(args, s: Setup, *, client_factory, **_) -> int:
+def cmd_score(args, s: Setup, *, client_factory, rubric_checker, **_) -> int:
+    try:
+        rubric_checker(args.rubric)
+    except Exception as exc:
+        raise CliError(str(exc)) from exc
+    current_sha = hashlib.sha256(Path(args.rubric).read_bytes()).hexdigest()
     rubric = load_rubric(args.rubric)
+    paths = sorted((s.out_dir / "trials").glob("*.json"))
+    records = [_load_json(p) for p in paths]
+    stale = [r["trial_id"] for r in records if r.get("rubric_sha") != current_sha]
+    if stale:
+        raise CliError(f"{len(stale)} trial record(s) were made under a different rubric than "
+                       f"the current {args.rubric} (sha {current_sha[:12]}), e.g. {stale[0]}; "
+                       f"score them with that rubric or rerun into a fresh --out-dir")
     judge_client = None
     if args.judge_arm:
         if args.judge_arm not in s.arms:
@@ -308,8 +324,7 @@ def cmd_score(args, s: Setup, *, client_factory, **_) -> int:
         judge_client = ChargedClient(client_factory(arm), arm, s.budget)
 
     scores = []
-    for path in sorted((s.out_dir / "trials").glob("*.json")):
-        rec = _load_json(path)
+    for rec in records:
         spec = TrialSpec(rec["case_id"], rec["decision_id"], rec["level"], rec["stake"],
                          rec["scenario"], rec["arm"], rec["repeat"])
         probe_path = _probe_path(s, spec)
@@ -323,12 +338,17 @@ def cmd_score(args, s: Setup, *, client_factory, **_) -> int:
                 judge_client = None
             except ValueError as exc:
                 print(f"{rec['trial_id']}: judge reply unusable: {exc}", file=sys.stderr)
-        scores.append(score_trial(rec, probe, rubric, judged, s.case.leakage_terms))
+        scores.append(score_trial(rec, probe, rubric, judged, s.case.leakage_terms,
+                                  rules=s.rules))
 
     rows = summarize(scores)
     out = Path(args.results_dir) / "summary.csv"
     write_csv(rows, out)
     print(f"{len(scores)} trials scored; wrote {out}")
+    unprobed = sum(1 for sc in scores if population(sc) == "unprobed")
+    if unprobed:
+        print(f"warning: {unprobed} unprobed level 2-3 trials (no probe record); they are "
+              f"reported as population 'unprobed', not headline", file=sys.stderr)
     headline = [r for r in rows if r["population"] == "headline"]
     if headline:
         cols = ["arm", "decision_id", "level", "stake", "scenario", "population", "n",
@@ -344,14 +364,16 @@ def cmd_score(args, s: Setup, *, client_factory, **_) -> int:
 
 def main(argv: list[str] | None = None, *,
          client_factory: Callable[[Arm], ModelClient] | None = None,
-         rubric_checker: Callable[[Path], str] | None = None) -> int:
+         rubric_checker: Callable[[Path], str] | None = None,
+         approval_checker: Callable[[Path, Path], None] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     handlers = {"estimate": cmd_estimate, "probe": cmd_probe, "run": cmd_run, "score": cmd_score}
     try:
         setup = _setup(args)
         return handlers[args.command](
             args, setup, client_factory=client_factory or make_client,
-            rubric_checker=rubric_checker or assert_rubric_committed)
+            rubric_checker=rubric_checker or assert_rubric_committed,
+            approval_checker=approval_checker or assert_rubric_approved)
     except CliError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

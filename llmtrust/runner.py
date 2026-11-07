@@ -130,6 +130,15 @@ def assert_rubric_committed(rubric_path: Path, *, repo_root: Path | None = None)
     return hashlib.sha256(rubric_path.read_bytes()).hexdigest()
 
 
+def assert_rubric_approved(rubric_yaml: Path, rubric_md: Path) -> None:
+    """Raise if either rubric file still carries the DRAFT marker (the user removes it
+    when they approve the rubric)."""
+    for path in (Path(rubric_yaml), Path(rubric_md)):
+        if "DRAFT" in path.read_text(encoding="utf-8"):
+            raise RuntimeError(f"{path} is marked DRAFT: the rubric must be approved (and the "
+                               f"DRAFT marker removed and committed) before any model run")
+
+
 def _git_commit() -> str | None:
     try:
         out = subprocess.run(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"],
@@ -182,6 +191,11 @@ def run_trial(spec: TrialSpec, *, case: Case, dp: DecisionPoint, rules: Disguise
               max_tokens: int = 1500) -> Path:
     path = Path(out_dir) / "trials" / f"{spec.trial_id}.json"
     if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8")).get("rubric_sha")
+        if existing != rubric_sha:
+            raise RuntimeError(
+                f"{spec.trial_id}: existing record was made under rubric {existing}, not the "
+                f"current {rubric_sha}; use a fresh --out-dir instead of mixing rubrics")
         return path
 
     docs = load_sources(case, dp, Path(data_root), level=spec.level, scenario=spec.scenario)
