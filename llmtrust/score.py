@@ -142,7 +142,7 @@ def score_trial(record: dict, probe: dict | None, rubric: Rubric,
 
 GROUP_KEYS = ("arm", "decision_id", "level", "stake", "scenario", "population")
 CSV_COLUMNS = GROUP_KEYS + ("n", "n_invalid", "match_rate", "mean_alignment",
-                            "escalation_rate", "leak_rate", "mean_reasoning_score")
+                            "escalation_rate", "leak_rate", "mean_reasoning_score", "n_judged")
 
 
 def _rate(values: list[bool]) -> float | None:
@@ -187,6 +187,7 @@ def summarize(scores: list[dict]) -> list[dict]:
             "escalation_rate": _rate(have("escalation")),
             "leak_rate": _rate([bool(s["leak_hits"]) for s in valid]),
             "mean_reasoning_score": _mean(have("reasoning_score")),
+            "n_judged": len(have("reasoning_score")),
         })
     return rows
 

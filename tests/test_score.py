@@ -234,6 +234,12 @@ def test_summary_leak_and_reasoning_over_valid_trials_only():
     assert row["n"] == 3 and row["n_invalid"] == 1
     assert row["leak_rate"] == 0.5
     assert row["mean_reasoning_score"] == 2.0
+    assert row["n_judged"] == 2  # valid trials with a reasoning score
+
+
+def test_summary_n_judged_counts_only_scored_valid_trials():
+    (row,) = summarize([sc(reasoning_score=2), sc(reasoning_score=None), sc()])
+    assert row["n_judged"] == 1 and row["mean_reasoning_score"] == 2.0
 
 
 def test_summary_order_is_deterministic():
@@ -257,7 +263,7 @@ def test_write_csv_header_and_order(tmp_path):
         data = list(reader)
     assert header == ["arm", "decision_id", "level", "stake", "scenario", "population", "n",
                       "n_invalid", "match_rate", "mean_alignment", "escalation_rate",
-                      "leak_rate", "mean_reasoning_score"]
+                      "leak_rate", "mean_reasoning_score", "n_judged"]
     assert len(data) == 1 and data[0][0] == "a1"
 
 

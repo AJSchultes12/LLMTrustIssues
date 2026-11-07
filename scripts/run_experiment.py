@@ -37,6 +37,7 @@ from llmtrust.runner import (  # noqa: E402
     charged_complete,
     run_trials,
     trial_grid,
+    write_atomic,
 )
 from llmtrust.score import (  # noqa: E402
     judge_reasoning,
@@ -302,6 +303,20 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _judge_path(s: Setup, trial_id: str) -> Path:
+    return s.out_dir / "judge" / f"{trial_id}.json"
+
+
+def _cached_judgment(path: Path, rubric_sha: str, judge_arm: str) -> dict[str, bool] | None:
+    """A judgment saved by an earlier score run, if it used the same rubric and judge."""
+    if not path.is_file():
+        return None
+    cached = _load_json(path)
+    if cached.get("rubric_sha") != rubric_sha or cached.get("judge_arm") != judge_arm:
+        return None
+    return cached["criteria"]
+
+
 def _fmt(v) -> str:
     return "-" if v is None else (f"{v:.2f}" if isinstance(v, float) else str(v))
 
@@ -325,25 +340,42 @@ def cmd_score(args, s: Setup, *, client_factory, rubric_checker, **_) -> int:
         if args.judge_arm not in s.arms:
             raise CliError(f"judge arm {args.judge_arm!r} is not in {args.models}")
         arm = s.arms[args.judge_arm]
+        if arm.pool != "free" and s.caps.get(arm.pool) is None:
+            raise CliError(f"judge arm {args.judge_arm!r}: pool {arm.pool!r} has no cap; "
+                           f"set caps.{arm.pool} in {args.models}")
         judge_client = ChargedClient(client_factory(arm), arm, s.budget)
 
     scores = []
+    judged_count: dict[str, list[int]] = {}   # trial arm -> [judged, eligible]
     for rec in records:
         spec = TrialSpec(rec["case_id"], rec["decision_id"], rec["level"], rec["stake"],
                          rec["scenario"], rec["arm"], rec["repeat"])
         probe_path = _probe_path(s, spec)
         probe = _load_json(probe_path) if rec["level"] >= 2 and probe_path.exists() else None
         judged = None
-        if judge_client is not None and rec.get("parsed_choice") is not None:
-            try:
-                judged = judge_reasoning(judge_client, rubric, rec)
-            except BudgetExceeded as exc:
-                print(f"judge stopped at the spend cap: {exc}", file=sys.stderr)
-                judge_client = None
-            except ValueError as exc:
-                print(f"{rec['trial_id']}: judge reply unusable: {exc}", file=sys.stderr)
+        if args.judge_arm and rec.get("parsed_choice") is not None:
+            count = judged_count.setdefault(rec["arm"], [0, 0])
+            count[1] += 1
+            cache = _judge_path(s, rec["trial_id"])
+            judged = _cached_judgment(cache, current_sha, args.judge_arm)
+            if judged is None and judge_client is not None:
+                try:
+                    judged = judge_reasoning(judge_client, rubric, rec)
+                    write_atomic(cache, {"trial_id": rec["trial_id"],
+                                         "rubric_sha": current_sha,
+                                         "judge_arm": args.judge_arm, "criteria": judged})
+                except BudgetExceeded as exc:
+                    print(f"judge stopped at the spend cap: {exc}", file=sys.stderr)
+                    judge_client = None
+                except Exception as exc:  # one bad reply or transient error: leave unjudged
+                    print(f"{rec['trial_id']}: left unjudged: {type(exc).__name__}: {exc}",
+                          file=sys.stderr)
+            if judged is not None:
+                count[0] += 1
         scores.append(score_trial(rec, probe, rubric, judged, s.case.leakage_terms,
                                   rules=s.rules))
+    for trial_arm, (n_judged, n_eligible) in sorted(judged_count.items()):
+        print(f"judge: {trial_arm}: {n_judged}/{n_eligible} trials judged", file=sys.stderr)
 
     rows = summarize(scores)
     out = Path(args.results_dir) / "summary.csv"
@@ -357,7 +389,7 @@ def cmd_score(args, s: Setup, *, client_factory, rubric_checker, **_) -> int:
     if headline:
         cols = ["arm", "decision_id", "level", "stake", "scenario", "population", "n",
                 "n_invalid", "match_rate", "mean_alignment", "escalation_rate", "leak_rate",
-                "mean_reasoning_score"]
+                "mean_reasoning_score", "n_judged"]
         print("\t".join(cols))
         for r in headline:
             print("\t".join(_fmt(r[c]) for c in cols))

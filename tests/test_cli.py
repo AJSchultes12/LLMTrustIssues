@@ -441,6 +441,74 @@ def test_score_with_judge_arm(env):
     assert spent["other"] > 0
 
 
+def _run_free(env, repeats="1"):
+    cli.main(["run", *env["common"], "--arms", "free", "--repeats", repeats, "--skip-probes"],
+             client_factory=lambda arm: FakeClient(), rubric_checker=ok_checker)
+
+
+def _score(env, judge, *extra):
+    return cli.main(["score", *env["common"], "--results-dir", str(env["results"]),
+                     "--judge-arm", "paid", *extra], client_factory=lambda arm: judge,
+                    rubric_checker=ok_checker)
+
+
+def _rows(env):
+    with (env["results"] / "summary.csv").open(encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def test_judge_results_are_cached_and_reused(env):
+    _run_free(env)
+    judge = FakeClient(text='{"criteria": [true]}')
+    assert _score(env, judge) == 0
+    assert len(judge.calls) == 6
+    cached = sorted(p.name for p in (env["runs"] / "judge").glob("*.json"))
+    assert len(cached) == 6 and not list((env["runs"] / "judge").glob("*.tmp"))
+    spent = json.loads((env["runs"] / "budget.json").read_text(encoding="utf-8"))["spent"]
+    judge2 = FakeClient(text='{"criteria": [true]}')
+    assert _score(env, judge2) == 0
+    assert judge2.calls == []  # nothing judged or charged again
+    assert json.loads((env["runs"] / "budget.json").read_text(encoding="utf-8"))["spent"] == spent
+    assert all(r["mean_reasoning_score"] == "1.0" and r["n_judged"] == "1" for r in _rows(env))
+
+
+def test_judge_transient_error_leaves_trial_unjudged_and_continues(env, capsys):
+    _run_free(env)
+
+    class Flaky(FakeClient):
+        def complete(self, system, user, *, max_tokens):
+            if len(self.calls) == 1:
+                self.calls.append(None)
+                raise RuntimeError("HTTP 503")
+            return super().complete(system, user, max_tokens=max_tokens)
+
+    judge = Flaky(text='{"criteria": [true]}')
+    assert _score(env, judge) == 0
+    assert len(judge.calls) == 6
+    assert "HTTP 503" in capsys.readouterr().err
+    assert sum(int(r["n_judged"]) for r in _rows(env)) == 5
+    assert len(list((env["runs"] / "judge").glob("*.json"))) == 5
+    # the rerun judges only the one that failed
+    judge2 = FakeClient(text='{"criteria": [true]}')
+    assert _score(env, judge2) == 0
+    assert len(judge2.calls) == 1
+    assert sum(int(r["n_judged"]) for r in _rows(env)) == 6
+
+
+def test_judge_budget_stop_reports_judged_counts(env, capsys):
+    _run_free(env)
+    models = Path(env["common"][env["common"].index("--models") + 1])
+    raw = yaml.safe_load(models.read_text(encoding="utf-8"))
+    raw["caps"]["other"] = 0.0
+    models.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    judge = FakeClient(text='{"criteria": [true]}')
+    assert _score(env, judge) == 0
+    assert judge.calls == []
+    err = capsys.readouterr().err
+    assert "spend cap" in err and "0/6" in err
+    assert all(r["n_judged"] == "0" for r in _rows(env))
+
+
 def test_score_with_no_records_writes_header_only(env):
     code = cli.main(["score", *env["common"], "--results-dir", str(env["results"])],
                     rubric_checker=ok_checker)
