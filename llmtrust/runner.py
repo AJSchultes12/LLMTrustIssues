@@ -1,0 +1,211 @@
+"""Trial runner: build the grid, run one trial, resume, and write one JSON record each.
+
+A trial record is the only thing scoring reads, so it carries the full prompt, the
+raw reply, the exact model ID and provider, the rubric hash and the disguise
+parameters. Records are written atomically and never overwritten: a trial whose
+record exists is skipped without a model call or a charge.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import tempfile
+from dataclasses import asdict
+from pathlib import Path
+
+from llmtrust.budget import Budget, BudgetExceeded, estimate_tokens
+from llmtrust.disguise import DisguiseRules
+from llmtrust.models import Arm, ModelClient
+from llmtrust.prompts import build_prompt
+from llmtrust.sources import load_sources, select_context
+from llmtrust.types import Case, DecisionPoint, TrialSpec
+
+LEVELS = (1, 2, 3)
+ESTIMATE_MARGIN = 1.2
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_LETTER = re.compile(r"^[\W_]*([A-Za-z])[\W_]*$")
+
+
+# ---------- grid ----------
+
+def trial_grid(case: Case, arms: list[str], repeats: int, *,
+               twin_decisions: frozenset[str] = frozenset({"EN-3b"})) -> list[TrialSpec]:
+    specs: list[TrialSpec] = []
+    for dp in case.decision_points:
+        for level in LEVELS:
+            for stake in (True, False):
+                for arm in arms:
+                    for repeat in range(repeats):
+                        specs.append(TrialSpec(case.case_id, dp.id, level, stake,
+                                               "real", arm, repeat))
+        if dp.id in twin_decisions:
+            for stake in (True, False):
+                for arm in arms:
+                    for repeat in range(repeats):
+                        specs.append(TrialSpec(case.case_id, dp.id, 3, stake,
+                                               "twin", arm, repeat))
+    return specs
+
+
+# ---------- reply parsing ----------
+
+def _find_choice_object(text: str) -> dict | None:
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"\{", text):
+        try:
+            obj, _ = decoder.raw_decode(text, m.start())
+        except (ValueError, RecursionError):
+            continue
+        if isinstance(obj, dict) and "choice" in obj:
+            return obj
+    return None
+
+
+def parse_choice(text: str, option_map: dict[str, str]) -> tuple[str | None, str, str | None]:
+    """Return (original option text or None, reasoning, error). Never raises."""
+    try:
+        raw = text if isinstance(text, str) else ("" if text is None else str(text))
+        obj = _find_choice_object(raw)
+        if obj is None:
+            return None, raw, "no_json"
+        reasoning = obj.get("reasoning")
+        has_reasoning = isinstance(reasoning, str)
+        fallback = reasoning if has_reasoning else raw
+        choice = obj.get("choice")
+        if choice is None or (isinstance(choice, str) and not choice.strip()):
+            return None, fallback, "missing_choice"
+        m = _LETTER.match(choice) if isinstance(choice, str) else None
+        letter = m.group(1).upper() if m else None
+        if letter is None or letter not in option_map:
+            return None, fallback, "bad_choice"
+        return option_map[letter], reasoning if has_reasoning else "", None
+    except Exception:  # defensive: a malformed reply must never stop a batch
+        return None, text if isinstance(text, str) else "", "no_json"
+
+
+# ---------- git ----------
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True,
+                              text=True, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"git is unavailable: {exc}") from exc
+
+
+def assert_rubric_committed(rubric_path: Path, *, repo_root: Path | None = None) -> str:
+    """Return the SHA-256 of the rubric file, or raise if git does not hold it clean."""
+    rubric_path = Path(rubric_path).resolve()
+    repo = Path(repo_root).resolve() if repo_root is not None else rubric_path.parent
+    tracked = _git(repo, "ls-files", "--error-unmatch", "--", str(rubric_path))
+    if tracked.returncode != 0:
+        raise RuntimeError(f"{rubric_path} is not tracked by git: commit the rubric before "
+                           f"running trials ({tracked.stderr.strip()})")
+    status = _git(repo, "status", "--porcelain", "--", str(rubric_path))
+    if status.returncode != 0:
+        raise RuntimeError(f"git status failed for {rubric_path}: {status.stderr.strip()}")
+    if status.stdout.strip():
+        raise RuntimeError(f"{rubric_path} has uncommitted changes: commit the rubric "
+                           f"before running trials")
+    return hashlib.sha256(rubric_path.read_bytes()).hexdigest()
+
+
+def _git_commit() -> str | None:
+    try:
+        out = subprocess.run(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sha = out.stdout.strip()
+    return sha if out.returncode == 0 and sha else None
+
+
+# ---------- running ----------
+
+def _write_atomic(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def run_trial(spec: TrialSpec, *, case: Case, dp: DecisionPoint, rules: DisguiseRules | None,
+              rubric_sha: str, client: ModelClient, arm: Arm, budget: Budget,
+              data_root: Path, out_dir: Path, max_context_chars: int = 120_000,
+              max_tokens: int = 1500) -> Path:
+    path = Path(out_dir) / "trials" / f"{spec.trial_id}.json"
+    if path.exists():
+        return path
+
+    docs = load_sources(case, dp, Path(data_root), level=spec.level, scenario=spec.scenario)
+    docs, truncation_log = select_context(docs, max_context_chars)
+    prompt = build_prompt(case, dp, docs, level=spec.level, stake=spec.stake,
+                          rules=rules, repeat=spec.repeat)
+
+    if arm.pool != "free":
+        estimate = budget.estimate_usd(
+            arm, estimate_tokens(prompt.system + prompt.user), max_tokens) * ESTIMATE_MARGIN
+        budget.check(arm.pool, estimate)
+
+    completion = client.complete(prompt.system, prompt.user, max_tokens=max_tokens)
+
+    if arm.pool != "free":
+        budget.record(arm.pool, budget.estimate_usd(
+            arm, completion.input_tokens, completion.output_tokens))
+
+    choice, reasoning, error = parse_choice(completion.text, prompt.option_map)
+    record = {
+        "trial_id": spec.trial_id,
+        "case_id": spec.case_id,
+        "decision_id": spec.decision_id,
+        "level": spec.level,
+        "stake": spec.stake,
+        "scenario": spec.scenario,
+        "arm": spec.arm,
+        "repeat": spec.repeat,
+        "cutoff": dp.cutoff,
+        "prompt": {"system": prompt.system, "user": prompt.user},
+        "option_map": prompt.option_map,
+        "truncation_log": truncation_log,
+        "completion": asdict(completion),
+        "arm_config": {"model": arm.model, "provider": arm.provider,
+                       "temperature": arm.temperature, "pool": arm.pool},
+        "parsed_choice": choice,
+        "reasoning": reasoning,
+        "parse_error": error,
+        "rubric_sha": rubric_sha,
+        "git_commit": _git_commit(),
+        "disguise": ({"scale_factor": rules.scale_factor, "year_shift": rules.year_shift}
+                     if rules is not None and spec.level >= 2 else None),
+    }
+    _write_atomic(path, record)
+    return path
+
+
+def run_trials(specs: list[TrialSpec], *, case: Case, rules: DisguiseRules | None,
+               rubric_sha: str, clients: dict[str, ModelClient], arms: dict[str, Arm],
+               budget: Budget, data_root: Path, out_dir: Path,
+               **run_trial_kwargs) -> tuple[list[Path], bool]:
+    """Run specs in order. Returns (record paths, stopped_by_budget)."""
+    dps = {dp.id: dp for dp in case.decision_points}
+    paths: list[Path] = []
+    for spec in specs:
+        try:
+            paths.append(run_trial(
+                spec, case=case, dp=dps[spec.decision_id], rules=rules,
+                rubric_sha=rubric_sha, client=clients[spec.arm], arm=arms[spec.arm],
+                budget=budget, data_root=data_root, out_dir=out_dir, **run_trial_kwargs))
+        except BudgetExceeded:
+            return paths, True
+    return paths, False
