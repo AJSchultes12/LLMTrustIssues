@@ -67,13 +67,56 @@ def test_loads_all_kinds_before_cutoff(tmp_path):
     assert len(by_kind["filing"]) == 2 and len(by_kind["email"]) == 1
     htm = next(d for d in by_kind["filing"] if d.date == "2001-08-14")
     assert "Revenue grew." in htm.text and "<p>" not in htm.text and "var x" not in htm.text
-    assert htm.title == "2001-08-14_enron_10-Q_0001.htm"
+    assert htm.title == "10-Q 2001-08-14"  # form and date only: no CIK or accession
     txt = next(d for d in by_kind["filing"] if d.date == "2001-06-01")
     assert txt.text == "plain filing text"
     assert by_kind["email"][0].title == "Subj" and by_kind["email"][0].date == "2001-08-21"
     assert "Body text" in by_kind["email"][0].text
     assert by_kind["document"][0].title == "memo"
     assert [d.date for d in docs] == sorted(d.date for d in docs)
+
+
+SGML = """<SEC-DOCUMENT>0001024401-01-500010.txt : 20010814
+<SEC-HEADER>0001024401-01-500010.hdr.sgml : 20010814
+ACCESSION NUMBER:		0001024401-01-500010
+CONFORMED SUBMISSION TYPE:	10-Q
+CONFORMED PERIOD OF REPORT:	20010630
+FILED AS OF DATE:		20010814
+		CENTRAL INDEX KEY:			0001024401
+		STANDARD INDUSTRIAL CLASSIFICATION:	NATURAL GAS TRANSMISSION [4922]
+		IRS NUMBER:				470255140
+		BUSINESS PHONE:		7138536161
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>10-Q
+<TEXT>
+Quarterly report body.
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>
+"""
+
+
+def test_sgml_submission_header_is_stripped_and_title_has_no_accession(tmp_path):
+    write(raw_dir(tmp_path) / "2001-08-14_enron_10-Q_0001024401-01-500010.txt", SGML)
+    write(raw_dir(tmp_path) / "2001-05-15_enron_DEF 14A_0000950129-01-500183.htm",
+          "<p>Proxy</p>")
+    docs = load_sources(make_case(), make_dp(), tmp_path)
+    q = next(d for d in docs if d.date == "2001-08-14")
+    assert "Quarterly report body." in q.text
+    for gone in ("20010814", "20010630", "0001024401", "470255140", "7138536161",
+                 "ACCESSION", "CENTRAL INDEX KEY", "SEC-HEADER"):
+        assert gone not in q.text
+    assert q.title == "10-Q 2001-08-14"
+    proxy = next(d for d in docs if d.date == "2001-05-15")
+    assert proxy.title == "DEF 14A 2001-05-15"
+
+
+def test_header_without_document_tag_is_still_stripped(tmp_path):
+    text = "<SEC-HEADER>\nFILED AS OF DATE: 20010814\n</SEC-HEADER>\nBody."
+    write(raw_dir(tmp_path) / "2001-08-14_enron_8-K_0001024401-01-500011.txt", text)
+    (doc,) = load_sources(make_case(), make_dp(), tmp_path)
+    assert "20010814" not in doc.text and "Body." in doc.text
 
 
 def test_html_table_cells_are_separated(tmp_path):

@@ -126,16 +126,39 @@ def _files(directory: Path) -> list[Path]:
     return sorted(p for p in directory.iterdir() if p.is_file())
 
 
+_SGML_HEADER = re.compile(r"<(SEC|IMS)-HEADER>.*?</\1-HEADER>", re.DOTALL | re.IGNORECASE)
+# fetch_edgar.py names files <date>_<company>_<form>_<accession><suffix>
+_FILING_REST = re.compile(r"^[^_]+_(?P<form>.+)_[\d-]+$")
+
+
+def _strip_sgml_header(text: str) -> str:
+    """Drop an EDGAR full-submission header (CIK, accession, filing and period dates,
+    SIC, address, phone, IRS number): everything before the first <DOCUMENT> tag."""
+    i = text.find("<DOCUMENT>")
+    if i >= 0:
+        return text[i:]
+    return _SGML_HEADER.sub("", text)
+
+
+def _filing_title(rest: str, iso: str) -> str:
+    """Form type and date only; the file name's accession number would identify it."""
+    m = _FILING_REST.match(Path(rest).stem)
+    return f"{m.group('form') if m else 'filing'} {iso}"
+
+
 def _load_filings(raw: Path, cutoff: date) -> list[SourceDoc]:
     docs = []
     for p in _files(raw):
         if p.name in _NON_FILING_NAMES:
             continue
-        iso, _ = _dated_name(p, cutoff, str(raw))
+        iso, rest = _dated_name(p, cutoff, str(raw))
         text = _read(p)
+        if p.suffix.lower() == ".txt":
+            text = _strip_sgml_header(text)
         if p.suffix.lower() in (".htm", ".html"):
             text = _strip_html(text)
-        docs.append(SourceDoc(date=iso, kind="filing", title=p.name, text=text))
+        docs.append(SourceDoc(date=iso, kind="filing", title=_filing_title(rest, iso),
+                              text=text))
     return docs
 
 

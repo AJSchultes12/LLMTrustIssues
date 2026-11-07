@@ -6,6 +6,12 @@ one fixed factor and shifts every year by a fixed number of years.
 
 A year shift of 28 is used because the Gregorian calendar repeats every 28 years
 between 1901 and 2099, so weekdays and day gaps between dates survive the shift.
+
+KNOWN LIMITATION (unscaled table figures): only amounts marked as money are scaled
+("$5", "$ 5", "USD 5", "5 million dollars"). Bare figures in financial tables, such
+as "40,112" in a column headed "(in millions)", are NOT scaled at level 3, so a
+filing's table can still carry the real numbers. See docs/leakage.md, "Known
+limitation: unscaled table figures".
 """
 from __future__ import annotations
 
@@ -72,10 +78,13 @@ def replace_terms(text: str, mapping: dict[str, str]) -> str:
 
 _NUM = r"\d{1,3}(?:,\d{3})+|\d+"
 _DOLLAR = re.compile(
-    rf"\$(?P<int>{_NUM})(?P<frac>\.\d+)?"
+    # "$5", "$ 5", "USD 5"; or a bare number that is followed by "dollars" (checked in repl)
+    r"(?:(?P<cur>\$\s?|(?<![A-Za-z])USD\s?)|(?<![\w.,$]))"
+    rf"(?P<int>{_NUM})(?P<frac>\.\d+)?"
     # single-dollar range such as "$10-15 million" or "$2 to 3 billion": scale both ends
     rf"(?:(?P<sep>\s*(?:-|–|—|to)\s*)(?P<int2>{_NUM})(?P<frac2>\.\d+)?)?"
-    r"(?P<unit>\s*(?:million|billion|thousand|trillion)\b)?",
+    r"(?P<unit>\s*(?:million|billion|thousand|trillion)\b)?"
+    r"(?P<dollars>\s+dollars\b)?",
     re.IGNORECASE,
 )
 
@@ -102,10 +111,12 @@ def scale_dollars(text: str, factor: float) -> str:
         return _format_amount(_sig3(number * f))
 
     def repl(m: re.Match[str]) -> str:
-        out = "$" + scaled(m.group("int"), m.group("frac"))
+        if m.group("cur") is None and m.group("dollars") is None:
+            return m.group(0)  # a plain number, not money
+        out = (m.group("cur") or "") + scaled(m.group("int"), m.group("frac"))
         if m.group("sep") is not None:
             out += m.group("sep") + scaled(m.group("int2"), m.group("frac2"))
-        return out + (m.group("unit") or "")
+        return out + (m.group("unit") or "") + (m.group("dollars") or "")
 
     return _DOLLAR.sub(repl, text)
 
@@ -117,6 +128,17 @@ _NUMERIC_DATE_2Y = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})/(\d{2})(?!\d)")
 _FISCAL_2Y = re.compile(r"\b(FY\s?'?)(\d{2})(?!\d)")
 _APOSTROPHE_YEAR = re.compile(r"(?<![\w'])'(\d{2})(?!\d)")
 _YEAR_4 = re.compile(r"(?<![\d,.$])(19[89]\d|20[0-2]\d|2030)(?!\d|,\d|\.\d)")
+_YEARS = r"19[89]\d|20[0-2]\d|2030"
+# compact EDGAR-style YYYYMMDD, e.g. "FILED AS OF DATE: 20010814"
+_COMPACT_DATE = re.compile(rf"(?<!\d)({_YEARS})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)")
+# quarter labels such as "2Q01"
+_QUARTER_2Y = re.compile(r"(?<![A-Za-z0-9])([1-4]Q)(\d{2})(?!\d)")
+# "14-Aug-01" (the four-digit form is covered by _YEAR_4)
+_DAY_MON_2Y = re.compile(
+    r"(?<!\d)(\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)-)(\d{2})(?!\d)",
+    re.IGNORECASE)
+# "14.08.2001"
+_DOTTED_DATE = re.compile(rf"(?<![\d.])(\d{{1,2}})\.(\d{{1,2}})\.({_YEARS})(?!\w|\.\d)")
 
 
 def _shift_2y(yy: str, years: int) -> str:
@@ -132,6 +154,17 @@ def shift_years(text: str, years: int) -> str:
             return m.group(0)
         return f"{m.group(1)}/{m.group(2)}/{_shift_2y(m.group(3), years)}"
 
+    def dotted(m: re.Match[str]) -> str:
+        day, month = int(m.group(1)), int(m.group(2))
+        if not (1 <= day <= 31 and 1 <= month <= 12):
+            return m.group(0)
+        return f"{m.group(1)}.{m.group(2)}.{int(m.group(3)) + years}"
+
+    text = _COMPACT_DATE.sub(
+        lambda m: f"{int(m.group(1)) + years}{m.group(2)}{m.group(3)}", text)
+    text = _DOTTED_DATE.sub(dotted, text)
+    text = _QUARTER_2Y.sub(lambda m: m.group(1) + _shift_2y(m.group(2), years), text)
+    text = _DAY_MON_2Y.sub(lambda m: m.group(1) + _shift_2y(m.group(2), years), text)
     text = _NUMERIC_DATE_2Y.sub(numeric, text)
     text = _FISCAL_2Y.sub(lambda m: m.group(1) + _shift_2y(m.group(2), years), text)
     text = _APOSTROPHE_YEAR.sub(lambda m: "'" + _shift_2y(m.group(1), years), text)

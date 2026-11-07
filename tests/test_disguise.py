@@ -158,6 +158,36 @@ def test_dollar_scaling_does_not_create_year_lookalikes(rules):
     assert out == "It paid $2,000 million in 2029."
 
 
+def test_year_shift_compact_and_other_date_forms():
+    assert shift_years("FILED AS OF DATE: 20010814", 28) == "FILED AS OF DATE: 20290814"
+    assert shift_years("period 19991231 and 20301231", 28) == "period 20271231 and 20581231"
+    assert shift_years("CIK 0001024401 and 12345678", 28) == "CIK 0001024401 and 12345678"
+    assert shift_years("2Q01 and 1Q01 results, 4Q00", 28) == "2Q29 and 1Q29 results, 4Q28"
+    assert shift_years("on 14-Aug-01 and 14-aug-2001", 28) == "on 14-Aug-29 and 14-aug-2029"
+    assert shift_years("dated 14.08.2001.", 28) == "dated 14.08.2029."
+    assert shift_years("version 1.2.2001x and 99.08.2001", 28) == "version 1.2.2001x and 99.08.2001"
+
+
+def test_scale_dollars_more_currency_forms():
+    assert scale_dollars("$ 1,234", 0.5) == "$ 617"
+    assert scale_dollars("USD 500 million", 0.37) == "USD 185 million"
+    assert scale_dollars("usd 100", 0.5) == "usd 50"
+    assert scale_dollars("500 million dollars", 0.37) == "185 million dollars"
+    assert scale_dollars("a 1,200 dollars fee", 0.5) == "a 600 dollars fee"
+    assert scale_dollars("$500 million dollars", 0.37) == "$185 million dollars"  # once only
+    assert scale_dollars("500 million shares; 2001", 0.37) == "500 million shares; 2001"
+    assert scale_dollars("US$10", 0.5) == "US$5"
+    assert scale_dollars("$10-$15 million", 0.37) == "$3.7-$5.55 million"
+
+
+def test_level3_strips_numeric_fingerprints(rules):
+    text = ("Revenue $ 50,129 million in 2Q01, USD 500 million debt, 100 million dollars "
+            "of notes; FILED 20010814; meeting 14-Aug-01 and 14.08.2001.")
+    out = disguise_text(text, 3, rules)
+    for old in ("50,129", "2Q01", "USD 500", "100 million dollars", "20010814", "-01 ", "2001"):
+        assert old not in out, (old, out)
+
+
 def test_replace_terms_standalone():
     assert replace_terms("Enron Corp. and Enron", {"Enron": "X", "Enron Corp.": "Y"}) == "Y and X"
     assert replace_terms("anything", {}) == "anything"

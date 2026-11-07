@@ -21,6 +21,16 @@ experimental arm:
 6. **Obfuscate** Modify Data specifically by a certain factor to ensure no simple signal 
    for the model to trace back to the case beyond the names
 
+### Known limitation: unscaled table figures
+
+Level 3 scales only amounts that are marked as money: `$5`, `$ 5`, `USD 5` and
+`5 million dollars`. Bare figures in financial tables (for example `40,112` in a
+column headed "(in millions)") are not scaled, because a number without a currency
+marker cannot be told apart from a share count, a percentage base or a page number.
+A filing's tables can therefore still carry the real figures at level 3, and a model
+that remembers them could recognise the case. The recognition probe is the check for
+this; a table-scaling scheme is not implemented.
+
 ## Scoring
 
 Decide the scoring rubric before running anything and commit it, so results
