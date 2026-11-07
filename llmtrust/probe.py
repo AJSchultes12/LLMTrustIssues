@@ -44,15 +44,17 @@ def build_probe_prompt(prompt: Prompt) -> Prompt:
     return Prompt(system=PROBE_SYSTEM, user=user, option_map={})
 
 
-def is_identified(answer: str, rules: DisguiseRules) -> bool:
-    """True when the reply contains any real identifier listed in the disguise rules.
+def is_identified(answer: str, rules: DisguiseRules, level: int = 3) -> bool:
+    """True when the reply contains a listed identifier that the given level disguises.
 
     Uses the disguise's own matching (word boundary; case-insensitive for keys longer
-    than 4 characters, case-sensitive for shorter ones). This can over-flag, for example
-    a place name the model mentions innocently. That is the conservative direction: a
-    trial wrongly marked contaminated is excluded, a contaminated one is never kept.
+    than 4 characters, case-sensitive for shorter ones). Real names are flagged at
+    levels 2 and 3; renamed structures (for example LJM1) are flagged only at level 3,
+    where they are disguised. The default is 3, the strictest. It can over-flag, for
+    example an innocently named place; that wrongly excludes a trial rather than
+    keeping a contaminated one.
     """
-    return bool(residual_identifiers(answer, rules, 2))
+    return bool(residual_identifiers(answer, rules, level))
 
 
 def run_probe(spec: TrialSpec, prompt: Prompt, *, client: ModelClient, arm: Arm,
@@ -77,7 +79,7 @@ def run_probe(spec: TrialSpec, prompt: Prompt, *, client: ModelClient, arm: Arm,
         "arm": spec.arm,
         "prompt": {"system": probe.system, "user": probe.user},
         "completion": asdict(completion),
-        "identified": is_identified(completion.text, rules),
+        "identified": is_identified(completion.text, rules, spec.level),
         "finished": completion.finished_at[:10],
     }
     _write_atomic(path, record)

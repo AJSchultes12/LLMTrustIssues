@@ -12,8 +12,8 @@ from llmtrust.types import Case, Completion, DecisionPoint, Prompt, SourceDoc, T
 RULES = DisguiseRules(
     names={"Enron": "the Company", "Lay": "the chairman", "Skilling": "the executive",
            "Houston": "a city"},
-    structures={"LJM1": "Partnership One"},
-    identifiers=["Enron", "Lay", "Skilling", "Houston", "LJM1"],
+    structures={"LJM1": "Partnership One", "Raptor": "Vehicle Two"},
+    identifiers=["Enron", "Lay", "Skilling", "Houston", "LJM1", "Raptor"],
     scale_factor=0.37, year_shift=28)
 
 OPTIONS = ["Refer to counsel", "Open a full investigation", "Do nothing"]
@@ -128,6 +128,17 @@ def test_is_identified_false_for_generic_description():
         '{"company": "a large energy trader", "year": "1999", "outcome": "collapse"}', RULES)
 
 
+def test_is_identified_flags_structure_names_only_at_level_3():
+    answer = "This looks like LJM1 and Raptor"
+    assert is_identified(answer, RULES, 3)
+    assert not is_identified(answer, RULES, 2)
+
+
+def test_is_identified_default_level_is_3():
+    assert is_identified("This looks like LJM1", RULES)
+    assert is_identified("Enron", RULES) and is_identified("Enron", RULES, 2)
+
+
 # ---------- run_probe ----------
 
 NAMES_ENRON = '{"company": "Enron", "year": "2001", "outcome": "bankruptcy"}'
@@ -210,3 +221,13 @@ def test_run_probe_rejects_level_1(tmp_path):
         run_probe(spec(level=1), make_prompt(1), client=client, arm=make_arm(),
                   budget=budget(tmp_path), rules=RULES, out_dir=tmp_path)
     assert client.calls == []
+
+
+def test_run_probe_uses_spec_level_for_structure_names(tmp_path):
+    reply = '{"company": "LJM1 and Raptor", "year": "unknown", "outcome": "unclear"}'
+    l3 = run_probe(spec(level=3), make_prompt(3), client=FakeClient(reply), arm=make_arm(),
+                   budget=budget(tmp_path), rules=RULES, out_dir=tmp_path)
+    l2 = run_probe(spec(level=2), make_prompt(2), client=FakeClient(reply), arm=make_arm(),
+                   budget=budget(tmp_path), rules=RULES, out_dir=tmp_path)
+    assert read(l3)["identified"] is True
+    assert read(l2)["identified"] is False
