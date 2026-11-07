@@ -1,0 +1,68 @@
+# Model arms, prices and spend caps. Prices are USD per million tokens.
+# Arms name an environment variable for the API key; never put a key in this file.
+# Verified 2026-11-06 unless marked UNVERIFIED.
+
+caps:
+  claude: 8.0
+  other: 20.0
+
+arms:
+  # Model ID and price verified 2026-11-06:
+  #   https://platform.claude.com/docs/en/models/overview  (API ID claude-haiku-5-5)
+  #   https://platform.claude.com/docs/en/about-claude/pricing
+  # Price is the tier for prompts up to 100,000 tokens ($0.10 in / $0.50 out).
+  # Prompts over 100,000 tokens are billed at $0.50 in / $2.50 out; the experiment's
+  # prompts should stay under that, but the runner's estimate would undercount if they do not.
+  # verify the claude model accepts a temperature setting before the first real run; set temperature to null if the API rejects it
+  claude:
+    provider: anthropic
+    model: claude-haiku-5-5
+    base_url: null
+    api_key_env: ANTHROPIC_API_KEY
+    temperature: 0.0
+    usd_per_mtok_in: 0.10
+    usd_per_mtok_out: 0.50
+    pool: claude
+
+  # Development arm on Google's free tier, so no price and no cap.
+  # Base URL verified 2026-11-06: https://aistudio.google.com/docs/openai
+  # Model ID is the example on that page; confirm it is available on the free tier
+  # for your key before relying on it.
+  dev-free:
+    provider: openai_compat
+    model: gemini-3.8-flash
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    temperature: 0.0
+    usd_per_mtok_in: null
+    usd_per_mtok_out: null
+    pool: free
+
+  # Large open-weight instruct model via OpenRouter. Slug verified 2026-11-06:
+  #   https://openrouter.ai/meta-llama/llama-3.3-70b-instruct
+  # OpenRouter prices vary by serving provider (seen 2026-11-06: $0.10 to $0.72 in,
+  # $0.32 to $2.253 out per MTok, table was truncated), so a single price is not determined.
+  # UNVERIFIED: fill from OpenRouter pricing page before the first real run
+  # (use the worst-case provider, or pin one provider in the request, so the estimate is an upper bound).
+  open-large:
+    provider: openai_compat
+    model: meta-llama/llama-3.3-70b-instruct
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    temperature: 0.0
+    usd_per_mtok_in: null
+    usd_per_mtok_out: null
+    pool: other
+
+  # Local Ollama on a laptop with a 4GB GPU. llama3.2:3b is a 2.0GB download
+  # (https://ollama.com/library/llama3.2, 2026-11-06). Run `ollama pull llama3.2:3b` first.
+  # Free, no key.
+  local-small:
+    provider: openai_compat
+    model: llama3.2:3b
+    base_url: http://localhost:11434/v1
+    api_key_env: null
+    temperature: 0.0
+    usd_per_mtok_in: null
+    usd_per_mtok_out: null
+    pool: free
