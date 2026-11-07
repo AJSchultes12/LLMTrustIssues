@@ -76,6 +76,19 @@ def test_loads_all_kinds_before_cutoff(tmp_path):
     assert [d.date for d in docs] == sorted(d.date for d in docs)
 
 
+def test_html_table_cells_are_separated(tmp_path):
+    write(raw_dir(tmp_path) / "2001-08-14_enron_10-Q_0001.htm",
+          "<table><tr><td>Kenneth L. Lay</td><td>Chairman</td></tr>"
+          "<tr><th>$50,129</th><th>40,112</th></tr></table>"
+          "<ul><li>one</li><li>two</li></ul>")
+    (doc,) = load_sources(make_case(), make_dp(), tmp_path)
+    lines = doc.text.splitlines()
+    assert "Kenneth L. Lay\tChairman" in lines
+    assert "$50,129\t40,112" in lines
+    assert "one" in lines and "two" in lines
+    assert "LayChairman" not in doc.text and "50,12940" not in doc.text
+
+
 def test_late_document_rejected(tmp_path):
     rd = raw_dir(tmp_path)
     write(rd / "documents" / "2001-08-23_x.txt", "late")

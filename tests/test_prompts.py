@@ -162,6 +162,19 @@ def test_disguise_leak_raised(rules):
     assert "Nonremovable" in str(exc.value)
 
 
+@pytest.mark.parametrize("level", [2, 3])
+def test_independent_audit_catches_replacer_blind_spot(rules, level):
+    # "Enron" inside a compound word escapes the word-boundary replacer and
+    # residual_identifiers; the substring audit must still stop the prompt
+    docs = [SourceDoc("2001-08-14", "email", "T", "See EnronBroadband for details.")]
+    with pytest.raises(DisguiseLeak) as exc:
+        build(docs=docs, level=level, rules=rules)
+    assert "Enron" in str(exc.value)
+    docs = [SourceDoc("2001-08-14", "email", "T", "From: lay@corp.example")]
+    with pytest.raises(DisguiseLeak):
+        build(docs=docs, level=level, rules=rules)
+
+
 def test_real_case_end_to_end_level3():
     case = load_case(ROOT / "cases" / "enron.yaml")
     rules = load_rules(ROOT / "cases" / "enron.disguise.yaml")
@@ -170,3 +183,15 @@ def test_real_case_end_to_end_level3():
     assert residual_identifiers(p.user + p.system, rules, 3) == []
     assert "Enron" not in p.user and "Lay" not in p.user
     assert set(p.option_map.values()) == set(dp.options)
+
+
+@pytest.mark.parametrize("dp_id", ["EN-3a", "EN-3b"])
+@pytest.mark.parametrize("level", [2, 3])
+def test_real_case_briefs_pass_independent_audit(dp_id, level):
+    from llmtrust.disguise import audit_text
+    case = load_case(ROOT / "cases" / "enron.yaml")
+    rules = load_rules(ROOT / "cases" / "enron.disguise.yaml")
+    dp = next(d for d in case.decision_points if d.id == dp_id)
+    for repeat in range(len(dp.options)):
+        p = build_prompt(case, dp, [], level=level, stake=True, rules=rules, repeat=repeat)
+        assert audit_text(p.system + "\n" + p.user, rules, level) == []

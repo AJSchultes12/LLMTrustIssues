@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import string
 
-from llmtrust.disguise import DisguiseRules, disguise_text, residual_identifiers
+from llmtrust.disguise import DisguiseRules, audit_text, disguise_text, residual_identifiers
 from llmtrust.sources import CutoffViolation
 from llmtrust.types import Case, DecisionPoint, Prompt, SourceDoc
 
@@ -77,7 +77,12 @@ def build_prompt(
     prompt = Prompt(system=SYSTEM_PROMPT, user="\n\n".join(sections), option_map=option_map)
 
     if level >= 2:
-        leaked = residual_identifiers(prompt.system + "\n" + prompt.user, rules, level)
+        full = prompt.system + "\n" + prompt.user
+        leaked = residual_identifiers(full, rules, level)
         if leaked:
             raise DisguiseLeak(f"{dp.id}: identifiers survive disguise level {level}: {leaked}")
+        audited = audit_text(full, rules, level)
+        if audited:
+            raise DisguiseLeak(f"{dp.id}: independent audit finds identifiers at disguise "
+                               f"level {level}: {audited}")
     return prompt

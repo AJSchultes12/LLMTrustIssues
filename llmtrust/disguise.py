@@ -162,3 +162,39 @@ def residual_identifiers(text: str, rules: DisguiseRules, level: int = 3) -> lis
         if _term_pattern([ident]).search(text):
             found.append(ident)
     return found
+
+
+# ---------- independent audit ----------
+
+_EMAIL_LIKE = re.compile(r"[\w.+-]+@[\w.-]+")
+_TOKEN_SPLIT = re.compile(r"[^A-Za-z0-9]+")
+
+
+def audit_text(text: str, rules: DisguiseRules, level: int) -> list[str]:
+    """Listed identifiers still present, by a check that does not share the replacer's
+    matcher, so a blind spot in replacement cannot hide itself.
+
+    Keys of 5+ characters: case-insensitive substring search (so "EnronCredit" and
+    "K. LAY" are caught). Keys of 4 characters or fewer would over-flag ordinary words
+    ("lay off"), so they are checked only inside email-address-like tokens, as a
+    case-insensitive whole token ("kenneth.lay@..." holds the token "lay").
+    Structure keys count only at level 3, as in residual_identifiers.
+    """
+    if level < 2:
+        return []
+    structure_keys = set(rules.structures)
+    keys = [k for k in rules.identifiers if level >= 3 or k not in structure_keys]
+    if level >= 3:
+        keys += [k for k in rules.structures if k not in keys]
+    lowered = text.lower()
+    email_tokens = {tok.lower() for m in _EMAIL_LIKE.finditer(text)
+                    for tok in _TOKEN_SPLIT.split(m.group(0)) if tok}
+    found: list[str] = []
+    for key in keys:
+        if len(key) > _SHORT_KEY_MAX:
+            hit = key.lower() in lowered
+        else:
+            hit = key.lower() in email_tokens
+        if hit and key not in found:
+            found.append(key)
+    return found

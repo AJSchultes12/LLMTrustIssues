@@ -5,6 +5,7 @@ import pytest
 
 from llmtrust.disguise import (
     DisguiseRules,
+    audit_text,
     disguise_text,
     load_rules,
     replace_terms,
@@ -195,6 +196,60 @@ def test_real_rules_file_loads(real_rules):
         assert k in r.structures
     for k in list(r.names) + list(r.structures):
         assert k in r.identifiers
+
+
+def test_audit_text_substring_for_long_keys(rules):
+    # the replacer needs word boundaries; the audit does not
+    assert audit_text("EnronBroadband and HOUSTONIAN", rules, 2) == ["Enron", "Houston"]
+    assert audit_text("the Company in a Gulf Coast city", rules, 2) == []
+    assert audit_text("", rules, 3) == []
+    assert audit_text("Enron", rules, 1) == []
+
+
+def test_audit_text_short_keys_only_inside_email_addresses(rules):
+    assert audit_text("they lay off staff; LAY said", rules, 3) == []
+    assert audit_text("write to k.lay@corp.example", rules, 2) == ["Lay"]
+    assert audit_text("write to LAY@corp.example", rules, 2) == ["Lay"]
+    assert audit_text("write to relay@corp.example", rules, 2) == []
+
+
+def test_audit_text_structures_only_at_level3(rules):
+    assert audit_text("LJM1 and the Raptors", rules, 2) == []
+    assert audit_text("the RAPTORS", rules, 3) == ["Raptors", "Raptor"]
+    assert audit_text("mail ljm@x.example", rules, 3) == ["LJM"]
+
+
+AUDIT_CASES = [
+    "From: kenneth.lay@enron.com\nTo: jeff.skilling@enron.com, steven.kean@enron.com\n"
+    "Cc: klay@enron.com; jskilling@ENRON.COM; andrew.fastow@enron.com; afastow@enron.com; "
+    "sherron.watkins@enron.com; swatkins@enron.com\nSubject: Q2",
+    "Kenneth L. Lay\tChairman\nJeffrey K. Skilling\tPresident\nK. Lay\tDirector",
+    "Visit EnronCredit.com or Enron Credit, EnronOnline and EOL; ticker ENE.",
+    "Signed K. LAY. Listed as LAY, KENNETH and Skilling, Jeffrey and Fastow, Andrew.",
+    "Kean, Whalley, Causey, Koenig, Kopper, Glisan and Baxter (Steven Kean, Greg Whalley, "
+    "Richard Causey, Mark Koenig, Michael Kopper, Ben Glisan, Cliff Baxter) discussed "
+    "Azurix and Dabhol with Skadden.",
+]
+
+
+@pytest.mark.parametrize("text", AUDIT_CASES)
+@pytest.mark.parametrize("level", [2, 3])
+def test_real_rules_blind_spots_come_out_clean(real_rules, text, level):
+    assert audit_text(text, real_rules, level) != []  # the raw text does leak
+    out = disguise_text(text, level, real_rules)
+    assert audit_text(out, real_rules, level) == [], out
+    assert residual_identifiers(out, real_rules, level) == [], out
+
+
+def test_real_rules_html_table_cells_come_out_clean(real_rules):
+    from llmtrust.sources import _strip_html
+    html = ("<table><tr><th>Name</th><th>Title</th></tr>"
+            "<tr><td>Kenneth L. Lay</td><td>Chairman</td></tr>"
+            "<tr><td>LAY, KENNETH</td><td>Director</td></tr></table>")
+    text = _strip_html(html)
+    for level in (2, 3):
+        out = disguise_text(text, level, real_rules)
+        assert audit_text(out, real_rules, level) == [], out
 
 
 def test_real_rules_clean_after_levels(real_rules):

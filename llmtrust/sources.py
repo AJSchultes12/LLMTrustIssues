@@ -32,6 +32,7 @@ _NON_FILING_NAMES = {"manifest.json", "emails.jsonl"}
 _REVIEWED = "REVIEWED"
 _BLOCK_TAGS = {"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
                "table", "pre", "title", "hr"}
+_CELL_TAGS = {"td", "th"}  # a tab between cells, so adjacent cells never glue together
 
 
 # ---------- helpers ----------
@@ -51,12 +52,16 @@ class _TextExtractor(HTMLParser):
             self._skip += 1
         elif tag in _BLOCK_TAGS:
             self.parts.append("\n")
+        elif tag in _CELL_TAGS:
+            self.parts.append("\t")
 
     def handle_endtag(self, tag):
         if tag in ("script", "style"):
             self._skip = max(0, self._skip - 1)
         elif tag in _BLOCK_TAGS:
             self.parts.append("\n")
+        elif tag in _CELL_TAGS:
+            self.parts.append("\t")
 
     def handle_data(self, data):
         if not self._skip:
@@ -68,7 +73,9 @@ def _strip_html(html: str) -> str:
     parser.feed(html)
     parser.close()
     text = "".join(parser.parts)
-    lines = [" ".join(line.split()) for line in text.splitlines()]
+    # collapse spaces within a cell; keep one tab between non-empty cells
+    lines = ["\t".join(c for c in (" ".join(cell.split()) for cell in line.split("\t")) if c)
+             for line in text.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
