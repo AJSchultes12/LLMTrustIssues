@@ -1,4 +1,4 @@
-# flop-bench
+# LLMTrustIssues
 
 Could a temperature-0 language model have made better calls than the executives
 behind some of history's biggest business failures? This repo builds a
@@ -31,7 +31,7 @@ fails the build.
 pip install -r requirements.txt
 
 # SEC requires a User-Agent with your contact info
-export SEC_USER_AGENT="flop-bench research Your Name you@example.com"
+export SEC_USER_AGENT="LLMTrustIssues research Your Name you@example.com"
 
 # Preview what each decision point gets, then download
 python scripts/fetch_edgar.py cases/blockbuster.yaml --dry-run

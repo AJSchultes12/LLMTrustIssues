@@ -7,7 +7,7 @@ data/raw/<case>/<decision>/, and writes a manifest with SHA-256 hashes so the
 dataset is reproducible.
 
 SEC requires a descriptive User-Agent with contact info. Set it yourself:
-    export SEC_USER_AGENT="flop-bench research your-name your-email@example.com"
+    export SEC_USER_AGENT="LLMTrustIssues research your-name your-email@example.com"
 
 Usage:
     python scripts/fetch_edgar.py cases/blockbuster.yaml

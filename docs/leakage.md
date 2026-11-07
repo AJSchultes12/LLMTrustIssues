@@ -18,6 +18,8 @@ experimental arm:
 5. **Determinism.** Temperature 0 improves reproducibility but is not fully
    deterministic across runs or providers. Log model version, date, and full
    prompts, and repeat each trial several times.
+6. **Obfuscate** Modify Data specifically by a certain factor to ensure no simple signal 
+   for the model to trace back to the case beyond the names
 
 ## Scoring
 
