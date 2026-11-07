@@ -158,3 +158,57 @@ def test_anthropic_client_omits_temperature_when_null():
 def test_unknown_provider_in_make_client():
     with pytest.raises(ValueError):
         make_client(_arm(provider="nope"))
+
+
+class FakeStatusError(Exception):
+    def __init__(self, status_code, message="boom"):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+def _raising_sdk(exc):
+    def create(**kwargs):
+        raise exc
+    return SimpleNamespace(messages=SimpleNamespace(create=create))
+
+
+def test_anthropic_status_error_becomes_runtime_error_naming_arm_and_status():
+    sdk = _raising_sdk(FakeStatusError(529, "overloaded"))
+    c = make_client(_anthropic_arm(name="claude-x"), sdk_client=sdk)
+    with pytest.raises(RuntimeError, match=r"claude-x.*529") as ei:
+        c.complete("s", "u", max_tokens=5)
+    assert "overloaded" in str(ei.value)
+
+
+def test_anthropic_real_sdk_status_error_is_wrapped():
+    import anthropic
+    import httpx
+    resp = httpx.Response(429, request=httpx.Request("POST", "http://offline.invalid"))
+    exc = anthropic.RateLimitError("rate limited", response=resp, body={"secret": "k-123"})
+    c = make_client(_anthropic_arm(name="claude-y"), sdk_client=_raising_sdk(exc))
+    with pytest.raises(RuntimeError, match=r"claude-y.*429") as ei:
+        c.complete("s", "u", max_tokens=5)
+    assert "k-123" not in str(ei.value)
+
+
+def test_anthropic_non_status_error_propagates_unchanged():
+    c = make_client(_anthropic_arm(), sdk_client=_raising_sdk(ValueError("bad")))
+    with pytest.raises(ValueError):
+        c.complete("s", "u", max_tokens=5)
+
+
+def test_anthropic_sdk_client_built_with_no_retries(monkeypatch):
+    import anthropic
+    captured = {}
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy-not-real")
+    make_client(_anthropic_arm()).complete("s", "u", max_tokens=5)
+    assert captured["max_retries"] == 0
+    assert captured["api_key"] == "dummy-not-real"

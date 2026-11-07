@@ -68,7 +68,7 @@ class AnthropicClient:
         if sdk_client is None:
             import anthropic
             key = os.environ.get(arm.api_key_env) if arm.api_key_env else None
-            sdk_client = anthropic.Anthropic(api_key=key)
+            sdk_client = anthropic.Anthropic(api_key=key, max_retries=0)
         self._sdk = sdk_client
 
     def complete(self, system: str, user: str, *, max_tokens: int) -> Completion:
@@ -80,7 +80,14 @@ class AnthropicClient:
         )
         if self.arm.temperature is not None:
             kwargs["temperature"] = self.arm.temperature
-        resp = self._sdk.messages.create(**kwargs)
+        try:
+            resp = self._sdk.messages.create(**kwargs)
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status is None:
+                raise
+            short = str(getattr(exc, "message", "") or "")[:200]
+            raise RuntimeError(f"arm {self.arm.name!r}: HTTP {status} from anthropic: {short}") from exc
         text = "".join(b.text for b in resp.content if getattr(b, "type", "text") == "text")
         return Completion(
             text=text,
