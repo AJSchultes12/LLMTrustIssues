@@ -6,6 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from llmtrust.fileio import replace_with_retry
 from llmtrust.models import Arm
 
 
@@ -66,7 +67,7 @@ class Budget:
                 json.dump({"spent": self._spent}, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, self.state_path)
+            replace_with_retry(tmp, self.state_path)
         except BaseException:
             if os.path.exists(tmp):
                 os.unlink(tmp)

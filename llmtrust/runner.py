@@ -18,6 +18,7 @@ from pathlib import Path
 
 from llmtrust.budget import Budget, BudgetExceeded, estimate_tokens
 from llmtrust.disguise import DisguiseRules
+from llmtrust.fileio import replace_with_retry
 from llmtrust.models import Arm, ModelClient
 from llmtrust.prompts import build_prompt
 from llmtrust.sources import load_sources, select_context
@@ -151,7 +152,9 @@ def _git_commit() -> str | None:
 
 # ---------- running ----------
 
-def _write_atomic(path: Path, record: dict) -> None:
+def write_atomic(path: Path, record: dict) -> None:
+    """Write a JSON record via a temp file and an atomic replace (retried on file locks)."""
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
@@ -159,7 +162,7 @@ def _write_atomic(path: Path, record: dict) -> None:
             json.dump(record, f, indent=2, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -236,7 +239,7 @@ def run_trial(spec: TrialSpec, *, case: Case, dp: DecisionPoint, rules: Disguise
         "disguise": ({"scale_factor": rules.scale_factor, "year_shift": rules.year_shift}
                      if rules is not None and spec.level >= 2 else None),
     }
-    _write_atomic(path, record)
+    write_atomic(path, record)
     return path
 
 

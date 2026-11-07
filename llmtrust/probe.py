@@ -15,7 +15,7 @@ from llmtrust.budget import Budget
 from llmtrust.disguise import DisguiseRules, residual_identifiers
 from llmtrust.models import Arm, ModelClient
 from llmtrust.prompts import OPTIONS_HEADER
-from llmtrust.runner import _write_atomic, charged_complete
+from llmtrust.runner import charged_complete, write_atomic
 from llmtrust.types import Prompt, TrialSpec
 
 PROBE_SYSTEM = "You are a careful business historian."
@@ -82,5 +82,5 @@ def run_probe(spec: TrialSpec, prompt: Prompt, *, client: ModelClient, arm: Arm,
         "identified": is_identified(completion.text, rules, spec.level),
         "finished": completion.finished_at[:10],
     }
-    _write_atomic(path, record)
+    write_atomic(path, record)
     return path
