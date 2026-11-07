@@ -28,6 +28,10 @@ data/raw/**
 !data/raw/**/manifest.json
 *.tar.gz
 
+# Experiment outputs are reproducible from the runner.
+data/runs/
+data/disguised/
+
 # Editor and operating-system files
 .vscode/
 .idea/
