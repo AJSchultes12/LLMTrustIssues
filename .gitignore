@@ -33,3 +33,7 @@ data/raw/**
 .idea/
 .DS_Store
 Thumbs.db
+
+# Agent worktrees and SDD scratch
+.claude/worktrees/
+.superpowers/
