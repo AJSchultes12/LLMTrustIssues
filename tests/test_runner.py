@@ -125,6 +125,46 @@ def test_grid_twin_decisions_override():
     assert {s.decision_id for s in specs if s.scenario == "twin"} == {"EN-1"}
 
 
+def test_grid_decisions_selects_only_those():
+    case = make_case(make_dp("EN-1"), make_dp("EN-3b"))
+    specs = trial_grid(case, ["a1"], 1, decisions=frozenset({"EN-3b"}))
+    assert {s.decision_id for s in specs} == {"EN-3b"}
+    assert len(specs) == 3 * 2 + 2
+
+
+def test_grid_unknown_decision_raises():
+    with pytest.raises(ValueError, match="EN-9"):
+        trial_grid(make_case(), ["a1"], 1, decisions=frozenset({"EN-9"}))
+
+
+@pytest.mark.parametrize("field", ["role", "scenario_brief", "stake_statement"])
+def test_grid_selected_decision_with_empty_field_raises(field):
+    case = make_case(make_dp("EN-1", **{field: ""}), make_dp("EN-3b"))
+    with pytest.raises(ValueError, match="EN-1"):
+        trial_grid(case, ["a1"], 1, decisions=frozenset({"EN-1"}))
+    with pytest.raises(ValueError, match="EN-1"):
+        trial_grid(case, ["a1"], 1)  # no selection means every decision is selected
+    assert trial_grid(case, ["a1"], 1, decisions=frozenset({"EN-3b"}))
+
+
+def test_grid_real_case_rubric_decisions():
+    from llmtrust.cases import load_case
+    from llmtrust.score import load_rubric
+    root = Path(__file__).resolve().parent.parent
+    case = load_case(root / "cases" / "enron.yaml")
+    decisions = frozenset(load_rubric(root / "cases" / "enron.rubric.yaml").options)
+    assert decisions == {"EN-3a", "EN-3b"}
+    specs = trial_grid(case, ["a1"], 4, decisions=decisions)
+    by = {d: [s for s in specs if s.decision_id == d] for d in ("EN-3a", "EN-3b")}
+    assert len(by["EN-3a"]) == 3 * 2 * 4
+    assert len([s for s in by["EN-3b"] if s.scenario == "real"]) == 3 * 2 * 4
+    assert len([s for s in by["EN-3b"] if s.scenario == "twin"]) == 2 * 4
+    assert len(specs) == 56
+    assert not {s.decision_id for s in specs} & {"EN-1", "EN-2"}
+    with pytest.raises(ValueError):
+        trial_grid(case, ["a1"], 1)  # EN-1/EN-2 have no role, brief or stake
+
+
 # ---------- parse_choice ----------
 
 def test_parse_valid_json():

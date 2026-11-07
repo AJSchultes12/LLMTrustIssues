@@ -31,10 +31,27 @@ _LETTER = re.compile(r"^[\W_]*([A-Za-z])[\W_]*$")
 
 # ---------- grid ----------
 
+def _selected_points(case: Case, decisions: frozenset[str] | None) -> list[DecisionPoint]:
+    """The decision points to run; None means all. Each must have a role, brief and stake."""
+    if decisions is not None:
+        unknown = sorted(set(decisions) - {dp.id for dp in case.decision_points})
+        if unknown:
+            raise ValueError(f"decision id(s) {unknown} are not in case {case.case_id!r}")
+    points = [dp for dp in case.decision_points if decisions is None or dp.id in decisions]
+    for dp in points:
+        empty = [f for f in ("role", "scenario_brief", "stake_statement")
+                 if not getattr(dp, f).strip()]
+        if empty:
+            raise ValueError(f"decision {dp.id} has empty {', '.join(empty)}: it cannot be "
+                             f"run (select other decisions)")
+    return points
+
+
 def trial_grid(case: Case, arms: list[str], repeats: int, *,
+               decisions: frozenset[str] | None = None,
                twin_decisions: frozenset[str] = frozenset({"EN-3b"})) -> list[TrialSpec]:
     specs: list[TrialSpec] = []
-    for dp in case.decision_points:
+    for dp in _selected_points(case, decisions):
         for level in LEVELS:
             for stake in (True, False):
                 for arm in arms:

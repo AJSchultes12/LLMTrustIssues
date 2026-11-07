@@ -113,6 +113,8 @@ def _build_parser() -> argparse.ArgumentParser:
     def with_arms(p: argparse.ArgumentParser) -> None:
         p.add_argument("--arms", nargs="+", required=True)
         p.add_argument("--repeats", type=int, default=3)
+        p.add_argument("--decisions", nargs="+", default=None,
+                       help="decision ids to run; default: those with an entry in the rubric")
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -144,6 +146,20 @@ def _setup(args: argparse.Namespace) -> Setup:
                  data_root=Path(args.data_root), budget=Budget(caps, state))
 
 
+def selected_decisions(args: argparse.Namespace) -> frozenset[str]:
+    """--decisions if given, else every decision id that has an entry in the rubric."""
+    if getattr(args, "decisions", None):
+        return frozenset(args.decisions)
+    return frozenset(load_rubric(args.rubric).options)
+
+
+def _grid(args: argparse.Namespace, s: Setup) -> list[TrialSpec]:
+    try:
+        return trial_grid(s.case, args.arms, args.repeats, decisions=selected_decisions(args))
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
+
+
 def _trial_path(s: Setup, spec: TrialSpec) -> Path:
     return s.out_dir / "trials" / f"{spec.trial_id}.json"
 
@@ -164,7 +180,7 @@ def _probe_specs(specs: list[TrialSpec]) -> dict[str, TrialSpec]:
 # ---------- estimate ----------
 
 def cmd_estimate(args, s: Setup, **_) -> int:
-    specs = trial_grid(s.case, args.arms, args.repeats)
+    specs = _grid(args, s)
     builder = PromptBuilder(s)
     probes = _probe_specs(specs)
     failed = False
@@ -212,7 +228,7 @@ def cmd_estimate(args, s: Setup, **_) -> int:
 def cmd_probe(args, s: Setup, *, client_factory, **_) -> int:
     if s.rules is None:
         raise CliError(f"disguise rules file {args.rules} not found; probes need it")
-    specs = trial_grid(s.case, args.arms, args.repeats)
+    specs = _grid(args, s)
     builder = PromptBuilder(s)
     probes = _probe_specs(specs)
     for name in args.arms:
@@ -245,7 +261,7 @@ def cmd_run(args, s: Setup, *, client_factory, rubric_checker, **_) -> int:
     except Exception as exc:
         raise CliError(str(exc)) from exc
 
-    specs = trial_grid(s.case, args.arms, args.repeats)
+    specs = _grid(args, s)
     if not args.skip_probes:
         missing = [key for key, sp in _probe_specs(specs).items() if not _probe_path(s, sp).exists()]
         if missing:

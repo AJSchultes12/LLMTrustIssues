@@ -48,6 +48,11 @@ def env(tmp_path) -> dict:
             "role": "Kenneth Lay, Enron's chairman.",
             "scenario_brief": "Skilling resigned and Fastow runs LJM1 in Houston.",
             "stake_statement": "You hold Enron stock worth $10 million.",
+        }, {
+            # like EN-1/EN-2 in the real case: no rubric entry, no role, brief or stake
+            "id": "EN-Y", "title": "Out of scope", "decision_date": "1999-06-28",
+            "cutoff": "1999-06-27", "options_to_present": ["Approve", "Reject"],
+            "actual_decision": "Approve",
         }],
     }), encoding="utf-8")
     (cases / "rubric.yaml").write_text(yaml.safe_dump({
@@ -121,7 +126,7 @@ def test_estimate_skips_finished_trials_and_probes(env, capsys):
     from llmtrust.runner import trial_grid
     from llmtrust.cases import load_case
     case = load_case(Path(env["common"][1]))
-    for s in trial_grid(case, ["paid"], 1):
+    for s in trial_grid(case, ["paid"], 1, decisions=frozenset({"EN-X"})):
         (trials / f"{s.trial_id}.json").write_text("{}", encoding="utf-8")
     code = cli.main(["estimate", *env["common"], "--arms", "paid", "--repeats", "1"],
                     client_factory=exploding_factory)
@@ -137,6 +142,30 @@ def test_estimate_unpriced_paid_arm_gives_message_not_traceback(env, capsys):
     assert "unpriced" in captured.out + captured.err
     assert "price" in (captured.out + captured.err).lower()
     assert "Traceback" not in captured.out + captured.err
+
+
+def test_default_decisions_are_the_rubric_entries():
+    args = cli._build_parser().parse_args(["estimate", "--arms", "claude"])
+    assert cli.selected_decisions(args) == {"EN-3a", "EN-3b"}  # real cases/enron.rubric.yaml
+    args = cli._build_parser().parse_args(["estimate", "--arms", "claude",
+                                           "--decisions", "EN-3b"])
+    assert cli.selected_decisions(args) == {"EN-3b"}
+
+
+def test_estimate_default_skips_decisions_without_rubric_entry(env, capsys):
+    code = cli.main(["estimate", *env["common"], "--arms", "paid", "--repeats", "1"],
+                    client_factory=exploding_factory)
+    assert code == 0
+    assert "6 trials pending of 6" in capsys.readouterr().out
+
+
+def test_selecting_a_decision_without_brief_exits_2(env, capsys):
+    for command in ("estimate", "probe", "run"):
+        code = cli.main([command, *env["common"], "--arms", "free", "--repeats", "1",
+                         "--decisions", "EN-Y"],
+                        client_factory=exploding_factory, rubric_checker=ok_checker)
+        assert code == 2
+        assert "EN-Y" in capsys.readouterr().err
 
 
 def test_unknown_arm_exits_2(env, capsys):
