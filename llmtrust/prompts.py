@@ -24,6 +24,9 @@ REPLY_FORMAT = (
 )
 
 
+OPTIONS_HEADER = "Options:"
+
+
 class DisguiseLeak(Exception):
     """A listed identifier is still present in a prompt built at level 2 or 3."""
 
@@ -68,7 +71,7 @@ def build_prompt(
     sections.append("Materials:\n\n" + "\n\n".join(materials))
 
     option_lines = [f"{letter}. {d(text)}" for letter, text in option_map.items()]
-    sections.append("Options:\n" + "\n".join(option_lines))
+    sections.append(OPTIONS_HEADER + "\n" + "\n".join(option_lines))
     sections.append(REPLY_FORMAT)
 
     prompt = Prompt(system=SYSTEM_PROMPT, user="\n\n".join(sections), option_map=option_map)

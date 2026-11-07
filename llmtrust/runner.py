@@ -21,7 +21,7 @@ from llmtrust.disguise import DisguiseRules
 from llmtrust.models import Arm, ModelClient
 from llmtrust.prompts import build_prompt
 from llmtrust.sources import load_sources, select_context
-from llmtrust.types import Case, DecisionPoint, TrialSpec
+from llmtrust.types import Case, Completion, DecisionPoint, TrialSpec
 
 LEVELS = (1, 2, 3)
 ESTIMATE_MARGIN = 1.2
@@ -140,6 +140,25 @@ def _write_atomic(path: Path, record: dict) -> None:
         raise
 
 
+def charged_complete(client: ModelClient, arm: Arm, budget: Budget, system: str, user: str,
+                     max_tokens: int) -> Completion:
+    """Check the budget (estimate with margin), call the model, record the actual cost.
+
+    Pool "free" is neither checked nor charged. Raises BudgetExceeded before any call.
+    """
+    if arm.pool != "free":
+        estimate = budget.estimate_usd(
+            arm, estimate_tokens(system + user), max_tokens) * ESTIMATE_MARGIN
+        budget.check(arm.pool, estimate)
+
+    completion = client.complete(system, user, max_tokens=max_tokens)
+
+    if arm.pool != "free":
+        budget.record(arm.pool, budget.estimate_usd(
+            arm, completion.input_tokens, completion.output_tokens))
+    return completion
+
+
 def run_trial(spec: TrialSpec, *, case: Case, dp: DecisionPoint, rules: DisguiseRules | None,
               rubric_sha: str, client: ModelClient, arm: Arm, budget: Budget,
               data_root: Path, out_dir: Path, max_context_chars: int = 120_000,
@@ -153,16 +172,7 @@ def run_trial(spec: TrialSpec, *, case: Case, dp: DecisionPoint, rules: Disguise
     prompt = build_prompt(case, dp, docs, level=spec.level, stake=spec.stake,
                           rules=rules, repeat=spec.repeat)
 
-    if arm.pool != "free":
-        estimate = budget.estimate_usd(
-            arm, estimate_tokens(prompt.system + prompt.user), max_tokens) * ESTIMATE_MARGIN
-        budget.check(arm.pool, estimate)
-
-    completion = client.complete(prompt.system, prompt.user, max_tokens=max_tokens)
-
-    if arm.pool != "free":
-        budget.record(arm.pool, budget.estimate_usd(
-            arm, completion.input_tokens, completion.output_tokens))
+    completion = charged_complete(client, arm, budget, prompt.system, prompt.user, max_tokens)
 
     choice, reasoning, error = parse_choice(completion.text, prompt.option_map)
     record = {
